@@ -1,0 +1,71 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String       @id @default(uuid())
+  email        String       @unique
+  passwordHash String       @map("password_hash")
+  name         String?
+  plan         String       @default("free")
+  creditsUsed  Int          @default(0) @map("credits_used")
+  creditsLimit Int          @default(10) @map("credits_limit")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  predictions  Prediction[]
+  assets       Asset[]
+  apiKeys      ApiKey[]
+
+  @@map("users")
+}
+
+model Prediction {
+  id                     String    @id @default(uuid())
+  userId                 String?   @map("user_id")
+  user                   User?     @relation(fields: [userId], references: [id])
+  workflow               String
+  model                  String
+  prompt                 String?
+  inputParams            Json?     @map("input_params")
+  status                 String    @default("pending")
+  replicatePredictionId  String?   @map("replicate_prediction_id")
+  outputUrl              String?   @map("output_url")
+  errorMessage           String?   @map("error_message")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  completedAt            DateTime? @map("completed_at")
+  assets                 Asset[]
+
+  @@map("predictions")
+}
+
+model Asset {
+  id           String      @id @default(uuid())
+  userId       String?     @map("user_id")
+  user         User?       @relation(fields: [userId], references: [id])
+  predictionId String?     @map("prediction_id")
+  prediction   Prediction? @relation(fields: [predictionId], references: [id])
+  url          String
+  type         String
+  thumbnailUrl String?     @map("thumbnail_url")
+  fileSize     Int?        @map("file_size")
+  isFavorite   Boolean     @default(false) @map("is_favorite")
+  createdAt    DateTime    @default(now()) @map("created_at")
+
+  @@map("assets")
+}
+
+model ApiKey {
+  id         String    @id @default(uuid())
+  userId     String?   @map("user_id")
+  user       User?     @relation(fields: [userId], references: [id])
+  key        String    @unique
+  name       String?
+  lastUsedAt DateTime? @map("last_used_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@map("api_keys")
+}

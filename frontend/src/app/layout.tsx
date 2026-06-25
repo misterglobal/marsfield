@@ -1,0 +1,248 @@
+'use client';
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useState, useEffect, createContext, useContext } from "react";
+import { api } from "@/lib/api";
+import "./globals.css";
+
+interface UserInfo {
+  id: string;
+  email: string;
+  name: string | null;
+  plan?: string;
+  creditsUsed?: number;
+  creditsLimit?: number;
+}
+
+interface AuthContextType {
+  user: UserInfo | null;
+  token: string | null;
+  login: (email: string, password: string) => Promise<void>;
+  logout: () => void;
+}
+
+const AuthContext = createContext<AuthContextType>({
+  user: null,
+  token: null,
+  login: async () => {},
+  logout: () => {},
+});
+
+export function useAuth() {
+  return useContext(AuthContext);
+}
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  const pathname = usePathname();
+  const [user, setUser] = useState<UserInfo | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [showLogin, setShowLogin] = useState(false);
+  const [loginEmail, setLoginEmail] = useState('creator@marsfield.ai');
+  const [loginPassword, setLoginPassword] = useState('password123');
+  const [loginError, setLoginError] = useState('');
+  const [loginLoading, setLoginLoading] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedToken = localStorage.getItem('token');
+      const savedUser = localStorage.getItem('user');
+      if (savedToken && savedUser) {
+        setToken(savedToken);
+        setUser(JSON.parse(savedUser));
+      }
+    }
+  }, []);
+
+  const handleLogin = async (email: string, password: string) => {
+    setLoginLoading(true);
+    setLoginError('');
+    try {
+      const data = await api.login({ email, password });
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      setToken(data.token);
+      setUser(data.user);
+      setShowLogin(false);
+    } catch (err: any) {
+      setLoginError(err.message || 'Login failed');
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setToken(null);
+    setUser(null);
+  };
+
+  const menuItems = [
+    { name: "Video Studio", href: "/", icon: "🎬" },
+    { name: "Asset Library", href: "/library", icon: "📁" },
+    { name: "Settings & API", href: "/settings", icon: "⚙️" },
+  ];
+
+  return (
+    <AuthContext.Provider value={{ user, token, login: handleLogin, logout: handleLogout }}>
+      <html lang="en">
+        <body>
+          {/* Persistent Sidebar */}
+          <aside className="sidebar">
+            <div className="sidebar-logo">
+              <span>🌌</span> Marsfield
+            </div>
+            <ul className="sidebar-menu">
+              {menuItems.map((item) => {
+                const isActive = pathname === item.href;
+                return (
+                  <li key={item.name} className={`sidebar-item ${isActive ? "active" : ""}`}>
+                    <Link href={item.href}>
+                      <span>{item.icon}</span> {item.name}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+            <div className="sidebar-footer">
+              {user ? (
+                <>
+                  <div style={{ fontSize: "0.85rem", color: "var(--foreground-muted)" }}>
+                    {user.email}
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span className="badge badge-purple">Connected</span>
+                    <button
+                      onClick={handleLogout}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "var(--foreground-muted)",
+                        cursor: "pointer",
+                        fontSize: "0.8rem",
+                        textDecoration: "underline",
+                      }}
+                    >
+                      Logout
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <button
+                  className="btn btn-primary"
+                  style={{ width: "100%" }}
+                  onClick={() => setShowLogin(true)}
+                >
+                  Sign In
+                </button>
+              )}
+            </div>
+          </aside>
+
+          {/* Content Container */}
+          <div className="workspace-container">
+            <header className="top-bar">
+              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                <h2 style={{ fontSize: "1.1rem", fontWeight: 600, fontFamily: "var(--font-display)" }}>
+                  {pathname === "/" && "Studio Creative Workspace"}
+                  {pathname === "/library" && "Asset Vault & Library"}
+                  {pathname === "/settings" && "Developer & Studio Settings"}
+                </h2>
+              </div>
+              <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
+                {user ? (
+                  <>
+                    <span style={{ fontSize: "0.9rem", fontWeight: 500 }}>{user.name || user.email}</span>
+                    <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: "var(--primary)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "0.85rem" }}>
+                      {(user.name || user.email).charAt(0).toUpperCase()}
+                    </div>
+                  </>
+                ) : (
+                  <span style={{ fontSize: "0.85rem", color: "var(--foreground-muted)" }}>Not signed in</span>
+                )}
+              </div>
+            </header>
+
+            <main className="workspace-content">
+              {children}
+            </main>
+          </div>
+
+          {/* Login Modal Overlay */}
+          {showLogin && (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.7)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 1000,
+                backdropFilter: "blur(6px)",
+              }}
+              onClick={() => setShowLogin(false)}
+            >
+              <div
+                className="glass-card"
+                style={{
+                  width: "380px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "1.25rem",
+                  padding: "2rem",
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h2 style={{ margin: 0, fontFamily: "var(--font-display)", fontSize: "1.3rem" }}>
+                  Sign In to Marsfield
+                </h2>
+                <p style={{ color: "var(--foreground-muted)", fontSize: "0.85rem", margin: 0 }}>
+                  Enter your credentials to access the studio.
+                </p>
+
+                {loginError && (
+                  <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", padding: "0.75rem", borderRadius: "8px", fontSize: "0.85rem", color: "#ef4444" }}>
+                    {loginError}
+                  </div>
+                )}
+
+                <div>
+                  <label className="form-label">Email</label>
+                  <input
+                    type="email"
+                    className="form-input"
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="form-label">Password</label>
+                  <input
+                    type="password"
+                    className="form-input"
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                  />
+                </div>
+                <button
+                  className="btn btn-primary"
+                  style={{ width: "100%", marginTop: "0.5rem" }}
+                  onClick={() => handleLogin(loginEmail, loginPassword)}
+                  disabled={loginLoading}
+                >
+                  {loginLoading ? "Signing in..." : "Sign In"}
+                </button>
+              </div>
+            </div>
+          )}
+        </body>
+      </html>
+    </AuthContext.Provider>
+  );
+}
