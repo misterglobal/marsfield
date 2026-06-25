@@ -1,0 +1,9 @@
+.git
+.gitignore
+.env
+backend/.env
+node_modules
+**/node_modules
+frontend/.next
+**/*.log
+PRD.md.txt
