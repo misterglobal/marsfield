@@ -25,7 +25,12 @@ async function request(endpoint: string, options: RequestInit = {}) {
     throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
   }
 
-  return response.json();
+  if (response.status === 204) {
+    return null;
+  }
+
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
 }
 
 export const api = {
@@ -46,9 +51,53 @@ export const api = {
   }),
   getPrediction: (id: string) => request(`/predictions/${id}`),
 
+  uploadFile: (file: File, purpose = 'generation-reference', onProgress?: (percent: number) => void) => new Promise<any>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE_URL}/uploads`);
+    const token = localStorage.getItem('token');
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress?.(Math.round((event.loaded / event.total) * 100));
+    };
+    xhr.onload = () => {
+      let data: any = {};
+      try { data = xhr.responseText ? JSON.parse(xhr.responseText) : {}; } catch { /* use generic error */ }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+      else reject(new Error(data.error || `Upload failed with status ${xhr.status}`));
+    };
+    xhr.onerror = () => reject(new Error('Upload failed due to a network error'));
+    const body = new FormData();
+    body.append('file', file);
+    body.append('purpose', purpose);
+    xhr.send(body);
+  }),
+
   // Assets
-  getAssets: () => request('/assets'),
+  getAssets: (projectId?: string) => request(projectId ? `/assets?project_id=${encodeURIComponent(projectId)}` : '/assets'),
   toggleFavorite: (id: string) => request(`/assets/${id}/favorite`, {
     method: 'POST',
+  }),
+
+  // Projects / storyboards
+  getProjects: () => request('/projects'),
+  getProject: (id: string) => request(`/projects/${id}`),
+  createProject: (payload: any) => request('/projects', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  saveStoryboardScene: (projectId: string, payload: any) => request(`/projects/${projectId}/storyboard-scenes`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+
+  // Account
+  getUsage: () => request('/account/usage'),
+  getApiKeys: () => request('/account/api-keys'),
+  createApiKey: (payload: any) => request('/account/api-keys', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  deleteApiKey: (id: string) => request(`/account/api-keys/${id}`, {
+    method: 'DELETE',
   }),
 };

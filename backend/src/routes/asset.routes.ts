@@ -14,14 +14,47 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res: Response)
        return;
     }
 
+    const projectId = typeof req.query.project_id === 'string' ? req.query.project_id : undefined;
+
+    if (projectId) {
+      const project = await prisma.project.findFirst({
+        where: { id: projectId, userId: user.id },
+        select: { id: true },
+      });
+
+      if (!project) {
+        res.status(404).json({ error: 'Project not found' });
+        return;
+      }
+    }
+
     const assets = await prisma.asset.findMany({
-      where: { userId: user.id },
+      where: {
+        userId: user.id,
+        ...(projectId ? { projectId } : {}),
+      },
       include: {
+        storageObject: {
+          select: {
+            provider: true,
+            mimeType: true,
+            byteSize: true,
+          },
+        },
         prediction: {
           select: {
             prompt: true,
             model: true,
             workflow: true,
+            variationGroupId: true,
+            variationIndex: true,
+            variationCount: true,
+          },
+        },
+        project: {
+          select: {
+            id: true,
+            name: true,
           },
         },
       },

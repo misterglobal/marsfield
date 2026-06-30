@@ -16,7 +16,7 @@ FROM node:20-alpine AS runtime
 
 WORKDIR /app
 ENV NODE_ENV=production
-RUN apk add --no-cache openssl
+RUN apk add --no-cache openssl ffmpeg
 
 COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/backend/package.json backend/package.json

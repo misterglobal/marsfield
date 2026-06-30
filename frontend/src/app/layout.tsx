@@ -19,6 +19,7 @@ interface AuthContextType {
   user: UserInfo | null;
   token: string | null;
   login: (email: string, password: string) => Promise<void>;
+  register: (email: string, password: string, name?: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -26,6 +27,7 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   token: null,
   login: async () => {},
+  register: async () => {},
   logout: () => {},
 });
 
@@ -42,8 +44,10 @@ export default function RootLayout({
   const [user, setUser] = useState<UserInfo | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [showLogin, setShowLogin] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [loginEmail, setLoginEmail] = useState('creator@marsfield.ai');
   const [loginPassword, setLoginPassword] = useState('password123');
+  const [registerName, setRegisterName] = useState('');
   const [loginError, setLoginError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
 
@@ -75,6 +79,24 @@ export default function RootLayout({
     }
   };
 
+  const handleRegister = async (email: string, password: string, name?: string) => {
+    setLoginLoading(true);
+    setLoginError('');
+    try {
+      const data = await api.register({ email, password, name: name?.trim() || undefined });
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      setToken(data.token);
+      setUser(data.user);
+      setShowLogin(false);
+      setAuthMode('login');
+    } catch (err: any) {
+      setLoginError(err.message || 'Account creation failed');
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
@@ -84,12 +106,13 @@ export default function RootLayout({
 
   const menuItems = [
     { name: "Video Studio", href: "/", icon: "🎬" },
+    { name: "Projects", href: "/projects", icon: "🗂️" },
     { name: "Asset Library", href: "/library", icon: "📁" },
     { name: "Settings & API", href: "/settings", icon: "⚙️" },
   ];
 
   return (
-    <AuthContext.Provider value={{ user, token, login: handleLogin, logout: handleLogout }}>
+    <AuthContext.Provider value={{ user, token, login: handleLogin, register: handleRegister, logout: handleLogout }}>
       <html lang="en">
         <body>
           {/* Persistent Sidebar */}
@@ -150,6 +173,7 @@ export default function RootLayout({
               <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
                 <h2 style={{ fontSize: "1.1rem", fontWeight: 600, fontFamily: "var(--font-display)" }}>
                   {pathname === "/" && "Studio Creative Workspace"}
+                  {pathname === "/projects" && "Projects & Storyboards"}
                   {pathname === "/library" && "Asset Vault & Library"}
                   {pathname === "/settings" && "Developer & Studio Settings"}
                 </h2>
@@ -200,10 +224,12 @@ export default function RootLayout({
                 onClick={(e) => e.stopPropagation()}
               >
                 <h2 style={{ margin: 0, fontFamily: "var(--font-display)", fontSize: "1.3rem" }}>
-                  Sign In to Marsfield
+                  {authMode === 'login' ? 'Sign In to Marsfield' : 'Create your Marsfield account'}
                 </h2>
                 <p style={{ color: "var(--foreground-muted)", fontSize: "0.85rem", margin: 0 }}>
-                  Enter your credentials to access the studio.
+                  {authMode === 'login'
+                    ? 'Enter your credentials to access the studio.'
+                    : 'Start with 10 generation credits and your own asset library.'}
                 </p>
 
                 {loginError && (
@@ -212,6 +238,18 @@ export default function RootLayout({
                   </div>
                 )}
 
+                {authMode === 'register' && (
+                  <div>
+                    <label className="form-label">Name</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={registerName}
+                      placeholder="Optional"
+                      onChange={(e) => setRegisterName(e.target.value)}
+                    />
+                  </div>
+                )}
                 <div>
                   <label className="form-label">Email</label>
                   <input
@@ -229,14 +267,46 @@ export default function RootLayout({
                     value={loginPassword}
                     onChange={(e) => setLoginPassword(e.target.value)}
                   />
+                  {authMode === 'register' && (
+                    <p style={{ color: "var(--foreground-muted)", fontSize: "0.75rem", margin: "0.4rem 0 0" }}>
+                      Use at least 8 characters.
+                    </p>
+                  )}
                 </div>
                 <button
                   className="btn btn-primary"
                   style={{ width: "100%", marginTop: "0.5rem" }}
-                  onClick={() => handleLogin(loginEmail, loginPassword)}
+                  onClick={() => {
+                    if (authMode === 'login') {
+                      void handleLogin(loginEmail, loginPassword);
+                    } else {
+                      void handleRegister(loginEmail, loginPassword, registerName);
+                    }
+                  }}
                   disabled={loginLoading}
                 >
-                  {loginLoading ? "Signing in..." : "Sign In"}
+                  {loginLoading
+                    ? authMode === 'login' ? "Signing in..." : "Creating account..."
+                    : authMode === 'login' ? "Sign In" : "Create Account"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginError('');
+                    setAuthMode((mode) => (mode === 'login' ? 'register' : 'login'));
+                  }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "var(--primary)",
+                    cursor: "pointer",
+                    fontSize: "0.85rem",
+                    textDecoration: "underline",
+                  }}
+                >
+                  {authMode === 'login'
+                    ? "Need an account? Create one"
+                    : "Already have an account? Sign in"}
                 </button>
               </div>
             </div>

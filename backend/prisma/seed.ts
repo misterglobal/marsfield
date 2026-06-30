@@ -22,7 +22,7 @@ async function main() {
       name: 'Marsfield Creator',
       plan: 'free',
       creditsUsed: 2,
-      creditsLimit: 10,
+      creditsLimit: 1000,
     },
   });
 

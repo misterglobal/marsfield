@@ -55,7 +55,7 @@ export class ReplicateService {
           outputUrl: this.getOutputUrl(prediction.output),
         };
       } catch (error) {
-        console.error("Replicate API Error:", error);
+        console.error("Replicate API Error:", this.formatReplicateError(error));
         throw error;
       }
     }
@@ -82,7 +82,7 @@ export class ReplicateService {
           error: prediction.error,
         };
       } catch (error) {
-        console.error("Replicate status retrieve error:", error);
+        console.error("Replicate status retrieve error:", this.formatReplicateError(error));
         throw error;
       }
     }
@@ -104,5 +104,25 @@ export class ReplicateService {
       return candidate.url || candidate.uri;
     }
     return undefined;
+  }
+
+  private formatReplicateError(error: unknown): Record<string, unknown> {
+    if (!error || typeof error !== 'object') {
+      return { message: String(error) };
+    }
+
+    const value = error as {
+      name?: string;
+      message?: string;
+      response?: { status?: number; statusText?: string; url?: string };
+    };
+
+    return {
+      name: value.name,
+      message: value.message,
+      status: value.response?.status,
+      statusText: value.response?.statusText,
+      url: value.response?.url,
+    };
   }
 }

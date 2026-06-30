@@ -11,6 +11,23 @@ cp .env.example .env
 
 Replace every placeholder in `.env`, then start the stack:
 
+If `POSTGRES_PASSWORD` contains URL-reserved characters such as `@`, `:`, `/`,
+`#`, `?`, or `%`, set `DATABASE_URL` explicitly in `.env` and URL-encode the
+password inside that connection string.
+
+For durable asset storage, configure Cloudflare R2 in `.env`:
+
+```bash
+R2_BUCKET_URL=https://9828e0da69ba61f88e9671219f7ffc74.r2.cloudflarestorage.com/marsfield
+R2_ACCESS_KEY_ID=...
+R2_SECRET_ACCESS_KEY=...
+R2_PUBLIC_BASE_URL=...
+```
+
+`R2_PUBLIC_BASE_URL` is recommended for browser playback/downloads. Use an R2
+public development URL or a custom domain pointed at the bucket. If it is not
+set, Marsfield stores the S3-compatible R2 object URL.
+
 ```bash
 docker compose up -d --build
 docker compose ps

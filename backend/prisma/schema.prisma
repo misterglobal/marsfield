@@ -15,22 +15,52 @@ model User {
   plan         String       @default("free")
   creditsUsed  Int          @default(0) @map("credits_used")
   creditsLimit Int          @default(10) @map("credits_limit")
+  storageUsageBytes Int     @default(0) @map("storage_usage_bytes")
   createdAt    DateTime     @default(now()) @map("created_at")
+  projects     Project[]
   predictions  Prediction[]
   assets       Asset[]
   apiKeys      ApiKey[]
+  usageEvents  UsageEvent[]
+  storageObjects StorageObject[]
+  brandKits    BrandKit[]
 
   @@map("users")
+}
+
+model Project {
+  id          String            @id @default(uuid())
+  userId      String            @map("user_id")
+  user        User              @relation(fields: [userId], references: [id])
+  name        String
+  description String?
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+  predictions Prediction[]
+  assets      Asset[]
+  scenes      StoryboardScene[]
+  brandKits   BrandKit[]
+
+  @@index([userId, createdAt])
+  @@map("projects")
 }
 
 model Prediction {
   id                     String    @id @default(uuid())
   userId                 String?   @map("user_id")
   user                   User?     @relation(fields: [userId], references: [id])
+  projectId              String?   @map("project_id")
+  project                Project?  @relation(fields: [projectId], references: [id])
+  storyboardSceneId      String?   @map("storyboard_scene_id")
+  storyboardScene        StoryboardScene? @relation(fields: [storyboardSceneId], references: [id])
   workflow               String
   model                  String
   prompt                 String?
   inputParams            Json?     @map("input_params")
+  variationGroupId       String?   @map("variation_group_id")
+  variationIndex         Int       @default(0) @map("variation_index")
+  variationCount         Int       @default(1) @map("variation_count")
+  creditCost             Int       @default(1) @map("credit_cost")
   status                 String    @default("pending")
   replicatePredictionId  String?   @map("replicate_prediction_id")
   outputUrl              String?   @map("output_url")
@@ -38,7 +68,11 @@ model Prediction {
   createdAt              DateTime  @default(now()) @map("created_at")
   completedAt            DateTime? @map("completed_at")
   assets                 Asset[]
+  usageEvents            UsageEvent[]
 
+  @@index([userId, createdAt])
+  @@index([projectId, createdAt])
+  @@index([variationGroupId])
   @@map("predictions")
 }
 
@@ -46,8 +80,12 @@ model Asset {
   id           String      @id @default(uuid())
   userId       String?     @map("user_id")
   user         User?       @relation(fields: [userId], references: [id])
+  projectId    String?     @map("project_id")
+  project      Project?    @relation(fields: [projectId], references: [id])
   predictionId String?     @map("prediction_id")
   prediction   Prediction? @relation(fields: [predictionId], references: [id])
+  storageObjectId String?  @unique @map("storage_object_id")
+  storageObject   StorageObject? @relation(fields: [storageObjectId], references: [id])
   url          String
   type         String
   thumbnailUrl String?     @map("thumbnail_url")
@@ -55,7 +93,77 @@ model Asset {
   isFavorite   Boolean     @default(false) @map("is_favorite")
   createdAt    DateTime    @default(now()) @map("created_at")
 
+  @@index([userId, createdAt])
+  @@index([projectId, createdAt])
   @@map("assets")
+}
+
+model StorageObject {
+  id        String   @id @default(uuid())
+  userId    String?  @map("user_id")
+  user      User?    @relation(fields: [userId], references: [id])
+  provider  String   @default("remote_url")
+  bucket    String?
+  key       String?
+  url       String
+  mimeType  String?  @map("mime_type")
+  byteSize  Int?     @map("byte_size")
+  checksum  String?
+  createdAt DateTime @default(now()) @map("created_at")
+  asset     Asset?
+
+  @@index([userId, createdAt])
+  @@index([provider, bucket, key])
+  @@map("storage_objects")
+}
+
+model StoryboardScene {
+  id              String       @id @default(uuid())
+  projectId       String       @map("project_id")
+  project         Project      @relation(fields: [projectId], references: [id])
+  index           Int
+  title           String?
+  prompt          String?
+  notes           String?
+  durationSeconds Int?         @map("duration_seconds")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  predictions     Prediction[]
+
+  @@unique([projectId, index])
+  @@map("storyboard_scenes")
+}
+
+model UsageEvent {
+  id           String      @id @default(uuid())
+  userId       String      @map("user_id")
+  user         User        @relation(fields: [userId], references: [id])
+  predictionId String?     @map("prediction_id")
+  prediction   Prediction? @relation(fields: [predictionId], references: [id])
+  eventType    String      @map("event_type")
+  credits      Int
+  metadata     Json?
+  createdAt    DateTime    @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@map("usage_events")
+}
+
+model BrandKit {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id])
+  projectId String?  @map("project_id")
+  project   Project? @relation(fields: [projectId], references: [id])
+  name      String
+  colors    Json?
+  fonts     Json?
+  assets    Json?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([userId, createdAt])
+  @@map("brand_kits")
 }
 
 model ApiKey {

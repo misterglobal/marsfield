@@ -10,6 +10,9 @@ const auth_routes_1 = __importDefault(require("./routes/auth.routes"));
 const generate_routes_1 = __importDefault(require("./routes/generate.routes"));
 const webhook_routes_1 = __importDefault(require("./routes/webhook.routes"));
 const asset_routes_1 = __importDefault(require("./routes/asset.routes"));
+const project_routes_1 = __importDefault(require("./routes/project.routes"));
+const account_routes_1 = __importDefault(require("./routes/account.routes"));
+const upload_routes_1 = __importDefault(require("./routes/upload.routes"));
 const queue_service_1 = require("./services/queue.service");
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 3001;
@@ -21,11 +24,14 @@ const corsOptions = {
     allowedHeaders: ['Content-Type', 'Authorization'],
 };
 app.use((0, cors_1.default)(corsOptions));
-app.use(express_1.default.json({ limit: '150mb' }));
-app.use(express_1.default.urlencoded({ limit: '150mb' }));
+app.use(express_1.default.json({ limit: '2mb' }));
+app.use(express_1.default.urlencoded({ limit: '2mb', extended: true }));
 // Routes Registration
 app.use('/api/v1/auth', auth_routes_1.default);
+app.use('/api/v1/account', account_routes_1.default);
 app.use('/api/v1/assets', asset_routes_1.default);
+app.use('/api/v1/projects', project_routes_1.default);
+app.use('/api/v1/uploads', upload_routes_1.default);
 app.use('/api/v1', generate_routes_1.default);
 app.use('/api/v1/webhooks', webhook_routes_1.default);
 // Health check endpoint

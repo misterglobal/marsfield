@@ -6,7 +6,22 @@ import { useAuth } from './layout';
 
 interface ReferenceFile {
   name: string;
-  data: string;
+  id: string;
+  url: string;
+  kind: 'image' | 'video' | 'audio';
+}
+
+interface ProjectOption {
+  id: string;
+  name: string;
+}
+
+interface VariationResult {
+  id: string;
+  status: string;
+  url?: string;
+  variationIndex: number;
+  type: string;
 }
 
 export default function StudioPage() {
@@ -22,11 +37,17 @@ export default function StudioPage() {
   const [aspectRatio, setAspectRatio] = useState('16:9');
   const [generateAudio, setGenerateAudio] = useState(true);
   const [seed, setSeed] = useState('');
+  const [variations, setVariations] = useState(1);
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState('');
+  const [selectedSceneId, setSelectedSceneId] = useState('');
+  const [quickProjectName, setQuickProjectName] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState(0);
   const [generationStatus, setGenerationStatus] = useState('');
   const [generationError, setGenerationError] = useState('');
   const [lastGeneratedAsset, setLastGeneratedAsset] = useState<{ id: string; url: string; type: string } | null>(null);
+  const [variationResults, setVariationResults] = useState<VariationResult[]>([]);
   const [pollAbortSignal, setPollAbortSignal] = useState<AbortController | null>(null);
   
   // File upload states
@@ -34,6 +55,9 @@ export default function StudioPage() {
   const [imagePreview, setImagePreview] = useState<string>('');
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [audioFileName, setAudioFileName] = useState<string>('');
+  const [imageStorageObjectId, setImageStorageObjectId] = useState('');
+  const [audioStorageObjectId, setAudioStorageObjectId] = useState('');
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [referenceImages, setReferenceImages] = useState<ReferenceFile[]>([]);
   const [referenceVideos, setReferenceVideos] = useState<ReferenceFile[]>([]);
   const [referenceAudio, setReferenceAudio] = useState<ReferenceFile[]>([]);
@@ -60,7 +84,7 @@ export default function StudioPage() {
     ],
     'lip-sync': [
       { id: 'bytedance/omni-human', name: 'OmniHuman V1', speed: 'High Fidelity' },
-      { id: 'heygen/avatar-v', name: 'Avatar-V', speed: 'Natural Motion' },
+      { id: 'bytedance/omni-human-1.5', name: 'OmniHuman 1.5', speed: 'Latest' },
     ],
     'text-to-image': [
       { id: 'black-forest-labs/flux-schnell', name: 'Flux Schnell', speed: 'Speed' },
@@ -75,7 +99,50 @@ export default function StudioPage() {
 
   const isSeedance = workflow === 'multimodal-video';
 
-  const readReferenceFiles = async (
+  useEffect(() => {
+    if (!token) {
+      setProjects([]);
+      setSelectedProjectId('');
+      return;
+    }
+
+    void api.getProjects()
+      .then((data) => setProjects(data.map((project: any) => ({ id: project.id, name: project.name }))))
+      .catch((error) => console.error('Failed to load projects:', error));
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    const query = new URLSearchParams(window.location.search);
+    const projectId = query.get('project_id');
+    const sceneId = query.get('scene_id');
+    if (!projectId || !sceneId) return;
+
+    void api.getProject(projectId).then((project) => {
+      const scene = project.scenes?.find((item: any) => item.id === sceneId);
+      if (!scene) return;
+      setSelectedProjectId(projectId);
+      setSelectedSceneId(sceneId);
+      setPrompt(scene.prompt || '');
+      if (scene.durationSeconds) setDuration(scene.durationSeconds);
+      setWorkflow('text-to-video');
+      setModel('alibaba/happyhorse-1.1');
+    }).catch((error) => setGenerationError(error.message || 'Failed to load storyboard scene'));
+  }, [token]);
+
+  const getBaseCredits = () => {
+    if (workflow === 'text-to-image') return 1;
+    if (model === 'bytedance/seedance-2.0-mini') return 2;
+    if (model === 'bytedance/seedance-2.0-fast') return 3;
+    if (model === 'bytedance/seedance-2.0') return 4;
+    if (workflow.includes('video') || workflow === 'lip-sync') return 3;
+    return 1;
+  };
+
+  const baseCredits = getBaseCredits();
+  const totalCredits = baseCredits + Math.max(0, variations - 1) * Math.ceil(baseCredits * 0.75);
+
+  const uploadReferenceFiles = async (
     files: FileList | null,
     maximum: number,
     kind: 'image' | 'video' | 'audio'
@@ -86,17 +153,20 @@ export default function StudioPage() {
       throw new Error(`You can upload at most ${maximum} ${kind} files.`);
     }
 
-    const maximumSize = kind === 'image' ? 10 * 1024 * 1024 : 25 * 1024 * 1024;
+    const maximumSize = kind === 'image' ? 10 * 1024 * 1024 : kind === 'audio' ? 50 * 1024 * 1024 : 100 * 1024 * 1024;
     if (selected.some((file) => file.size > maximumSize)) {
       throw new Error(`${kind === 'image' ? 'Images' : 'Video and audio files'} must be smaller than ${maximumSize / 1024 / 1024}MB each.`);
     }
 
-    return Promise.all(selected.map((file) => new Promise<ReferenceFile>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve({ name: file.name, data: reader.result as string });
-      reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
-      reader.readAsDataURL(file);
-    })));
+    setUploadProgress(0);
+    try {
+      return await Promise.all(selected.map(async (file) => {
+        const uploaded = await api.uploadFile(file, 'seedance-reference', setUploadProgress);
+        return { name: file.name, id: uploaded.id, url: uploaded.url, kind } as ReferenceFile;
+      }));
+    } finally {
+      setUploadProgress(null);
+    }
   };
 
   const handleReferenceUpload = async (
@@ -105,16 +175,7 @@ export default function StudioPage() {
   ) => {
     try {
       setGenerationError('');
-      const references = await readReferenceFiles(files, kind === 'image' ? 9 : 3, kind);
-      const otherReferences = kind === 'image'
-        ? [...referenceVideos, ...referenceAudio]
-        : kind === 'video'
-          ? [...referenceImages, ...referenceAudio]
-          : [...referenceImages, ...referenceVideos];
-      const encodedBytes = [...otherReferences, ...references].reduce((total, file) => total + file.data.length, 0);
-      if (encodedBytes > 120 * 1024 * 1024) {
-        throw new Error('Combined reference files must be smaller than 90MB.');
-      }
+      const references = await uploadReferenceFiles(files, kind === 'image' ? 9 : 3, kind);
 
       if (kind === 'image') setReferenceImages(references);
       if (kind === 'video') setReferenceVideos(references);
@@ -127,7 +188,7 @@ export default function StudioPage() {
   const handleFrameUpload = async (files: FileList | null, position: 'first' | 'last') => {
     try {
       setGenerationError('');
-      const [frame] = await readReferenceFiles(files, 1, 'image');
+      const [frame] = await uploadReferenceFiles(files, 1, 'image');
       if (position === 'first') setFirstFrame(frame || null);
       if (position === 'last') setLastFrame(frame || null);
     } catch (error) {
@@ -142,7 +203,19 @@ export default function StudioPage() {
     );
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleQuickCreateProject = async () => {
+    if (!quickProjectName.trim()) return;
+    try {
+      const project = await api.createProject({ name: quickProjectName.trim() });
+      setProjects((current) => [{ id: project.id, name: project.name }, ...current]);
+      setSelectedProjectId(project.id);
+      setQuickProjectName('');
+    } catch (err: any) {
+      setGenerationError(err.message || 'Failed to create project');
+    }
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 10 * 1024 * 1024) { // 10MB limit
@@ -150,15 +223,22 @@ export default function StudioPage() {
         return;
       }
       setImageFile(file);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setImagePreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+      setImagePreview(URL.createObjectURL(file));
+      setUploadProgress(0);
+      try {
+        const uploaded = await api.uploadFile(file, 'generation-input', setUploadProgress);
+        setImageStorageObjectId(uploaded.id);
+      } catch (error) {
+        setImageFile(null);
+        setImageStorageObjectId('');
+        setGenerationError(error instanceof Error ? error.message : 'Image upload failed');
+      } finally {
+        setUploadProgress(null);
+      }
     }
   };
 
-  const handleAudioUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 50 * 1024 * 1024) { // 50MB limit for audio
@@ -167,10 +247,21 @@ export default function StudioPage() {
       }
       setAudioFile(file);
       setAudioFileName(file.name);
+      setUploadProgress(0);
+      try {
+        const uploaded = await api.uploadFile(file, 'lip-sync-audio', setUploadProgress);
+        setAudioStorageObjectId(uploaded.id);
+      } catch (error) {
+        setAudioFile(null);
+        setAudioStorageObjectId('');
+        setGenerationError(error instanceof Error ? error.message : 'Audio upload failed');
+      } finally {
+        setUploadProgress(null);
+      }
     }
   };
 
-  const pollPrediction = async (id: string, abortSignal: AbortController) => {
+  const pollPrediction = async (id: string, abortSignal: AbortController, variationIndex = 0) => {
     let attempts = 0;
     const maxAttempts = 120; // 4 minutes with 2s interval
 
@@ -181,17 +272,24 @@ export default function StudioPage() {
       try {
         const data = await api.getPrediction(id);
         if (data.status === 'succeeded' && data.output_url) {
+          const type = workflow === 'text-to-image' ? 'image' : 'video';
+          setVariationResults((current) => current.map((item) =>
+            item.id === id ? { ...item, status: 'succeeded', url: data.output_url, type } : item
+          ));
           setGenerationProgress(100);
           setGenerationStatus('succeeded');
           setLastGeneratedAsset({
             id,
             url: data.output_url,
-            type: workflow === 'text-to-image' ? 'image' : 'video'
+            type,
           });
           setTimeout(() => setIsGenerating(false), 1500);
           return;
         }
         if (data.status === 'failed') {
+          setVariationResults((current) => current.map((item) =>
+            item.id === id ? { ...item, status: 'failed' } : item
+          ));
           setGenerationError(data.error || 'Generation failed');
           setGenerationStatus('failed');
           setTimeout(() => setIsGenerating(false), 2000);
@@ -231,12 +329,12 @@ export default function StudioPage() {
         return;
       }
     } else if (workflow === 'image-to-video') {
-      if (!imageFile) {
+      if (!imageStorageObjectId) {
         setGenerationError('Please upload an image.');
         return;
       }
     } else if (workflow === 'lip-sync') {
-      if (!imageFile || !audioFile) {
+      if (!imageStorageObjectId || !audioStorageObjectId) {
         setGenerationError('Please upload both image and audio files.');
         return;
       }
@@ -255,12 +353,15 @@ export default function StudioPage() {
     setGenerationStatus('submitting');
     setGenerationError('');
     setLastGeneratedAsset(null);
+    setVariationResults([]);
 
     try {
       const generatePayload: any = {
         workflow,
         model,
         prompt,
+        project_id: selectedProjectId || undefined,
+        storyboard_scene_id: selectedSceneId || undefined,
         params: {
           duration,
           fps,
@@ -270,28 +371,42 @@ export default function StudioPage() {
           aspect_ratio: aspectRatio,
           generate_audio: generateAudio,
           seed: seed === '' ? undefined : Number(seed),
+          variations,
         },
       };
 
       if (isSeedance) {
-        generatePayload.params.reference_images = referenceImages.map((file) => file.data);
-        generatePayload.params.reference_videos = referenceVideos.map((file) => file.data);
-        generatePayload.params.reference_audio = referenceAudio.map((file) => file.data);
-        generatePayload.params.first_frame_image = firstFrame?.data;
-        generatePayload.params.last_frame_image = lastFrame?.data;
+        generatePayload.params.reference_image_ids = referenceImages.map((file) => file.id);
+        generatePayload.params.reference_video_ids = referenceVideos.map((file) => file.id);
+        generatePayload.params.reference_audio_ids = referenceAudio.map((file) => file.id);
+        generatePayload.params.first_frame_image_id = firstFrame?.id;
+        generatePayload.params.last_frame_image_id = lastFrame?.id;
       }
 
       // Add file data if needed
-      if (imageFile && workflow === 'image-to-video') {
-        generatePayload.image = imagePreview; // Base64 encoded image
-      } else if (workflow === 'lip-sync' && imageFile && audioFile) {
-        generatePayload.image = imagePreview;
-        // For audio, we'd need to handle file upload separately
-        // For now, passing audio filename
-        generatePayload.audio_filename = audioFileName;
+      if (imageStorageObjectId && workflow === 'image-to-video') {
+        generatePayload.image_storage_object_id = imageStorageObjectId;
+      } else if (workflow === 'lip-sync' && imageStorageObjectId && audioStorageObjectId) {
+        generatePayload.image_storage_object_id = imageStorageObjectId;
+        generatePayload.audio_storage_object_id = audioStorageObjectId;
       }
 
       const data = await api.generate(generatePayload);
+      const resultType = workflow.includes('image') && workflow !== 'image-to-video' ? 'image' : 'video';
+      const returnedPredictions = Array.isArray(data.predictions) ? data.predictions : [{
+        id: data.id,
+        status: data.status,
+        output_url: data.output_url,
+        variation_index: 0,
+      }];
+
+      setVariationResults(returnedPredictions.map((prediction: any) => ({
+        id: prediction.id,
+        status: prediction.status,
+        url: prediction.output_url,
+        variationIndex: prediction.variation_index ?? 0,
+        type: resultType,
+      })));
 
       setGenerationProgress(15);
       setGenerationStatus('processing');
@@ -306,7 +421,9 @@ export default function StudioPage() {
         });
         setTimeout(() => setIsGenerating(false), 1500);
       } else {
-        await pollPrediction(data.id, abortController);
+        await Promise.all(returnedPredictions.map((prediction: any) =>
+          pollPrediction(prediction.id, abortController, prediction.variation_index ?? 0)
+        ));
       }
     } catch (err: any) {
       setGenerationError(err.message || 'Generation request failed');
@@ -598,6 +715,14 @@ export default function StudioPage() {
               {generationError}
             </div>
           )}
+          {uploadProgress !== null && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--foreground-muted)' }}>Uploading media… {uploadProgress}%</span>
+              <div style={{ height: 6, borderRadius: 999, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+                <div style={{ width: `${uploadProgress}%`, height: '100%', background: 'var(--primary)', transition: 'width 150ms ease' }} />
+              </div>
+            </div>
+          )}
 
           {!isGenerating ? (
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -609,7 +734,7 @@ export default function StudioPage() {
                   {generationStatus === 'succeeded'
                     ? 'Your asset has been added to the library.'
                     : token
-                      ? 'This request will consume 1 generation credit.'
+                      ? `This request will consume ${totalCredits} credit${totalCredits === 1 ? '' : 's'}. Variations cost extra.`
                       : 'Sign in to start generating.'}
                 </p>
               </div>
@@ -621,15 +746,15 @@ export default function StudioPage() {
                   (workflow === 'text-to-video' && !prompt) ||
                   (workflow === 'text-to-image' && !prompt) ||
                   (workflow === 'multimodal-video' && !prompt) ||
-                  (workflow === 'image-to-video' && !imageFile) ||
-                  (workflow === 'lip-sync' && (!imageFile || !audioFile))
+                  (workflow === 'image-to-video' && !imageStorageObjectId) ||
+                  (workflow === 'lip-sync' && (!imageStorageObjectId || !audioStorageObjectId)) || uploadProgress !== null
                 }
                 style={{ padding: '1rem 2.5rem', fontSize: '1.05rem', opacity: !token || 
                   (workflow === 'text-to-video' && !prompt) ||
                   (workflow === 'text-to-image' && !prompt) ||
                   (workflow === 'multimodal-video' && !prompt) ||
                   (workflow === 'image-to-video' && !imageFile) ||
-                  (workflow === 'lip-sync' && (!imageFile || !audioFile)) ? 0.5 : 1 }}
+                  (workflow === 'lip-sync' && (!imageStorageObjectId || !audioStorageObjectId)) || uploadProgress !== null ? 0.5 : 1 }}
               >
                 🚀 Generate Output
               </button>
@@ -688,6 +813,7 @@ export default function StudioPage() {
                 onClick={() => {
                   setPrompt('');
                   setLastGeneratedAsset(null);
+                  setVariationResults([]);
                   setGenerationStatus('');
                   setGenerationProgress(0);
                 }}
@@ -696,6 +822,29 @@ export default function StudioPage() {
                 ✨ Create New
               </button>
             </div>
+            {variationResults.length > 1 && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.75rem' }}>
+                {variationResults.map((result) => (
+                  <div key={result.id} style={{ border: '1px solid var(--panel-border)', borderRadius: '12px', padding: '0.75rem', background: 'rgba(255,255,255,0.03)' }}>
+                    <strong style={{ fontSize: '0.85rem' }}>Variation {result.variationIndex + 1}</strong>
+                    <span style={{ display: 'block', color: 'var(--foreground-muted)', fontSize: '0.75rem', margin: '0.25rem 0 0.5rem' }}>
+                      {result.status}
+                    </span>
+                    {result.url ? (
+                      result.type === 'video' ? (
+                        <video src={result.url} controls style={{ width: '100%', borderRadius: '8px', aspectRatio: '16/9', objectFit: 'cover' }} />
+                      ) : (
+                        <img src={result.url} alt={`Variation ${result.variationIndex + 1}`} style={{ width: '100%', borderRadius: '8px', aspectRatio: '16/9', objectFit: 'cover' }} />
+                      )
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '90px', borderRadius: '8px', background: 'rgba(0,0,0,0.25)', color: 'var(--foreground-muted)', fontSize: '0.8rem' }}>
+                        Processing...
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -705,6 +854,27 @@ export default function StudioPage() {
         <h3 style={{ fontSize: '1.1rem', fontWeight: 700, borderBottom: '1px solid var(--panel-border)', paddingBottom: '0.75rem' }}>
           🔧 Settings
         </h3>
+
+        <div>
+          <label className="form-label">Project</label>
+          <select className="form-select" value={selectedProjectId} onChange={(e) => setSelectedProjectId(e.target.value)}>
+            <option value="">No project</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>{project.name}</option>
+            ))}
+          </select>
+          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.65rem' }}>
+            <input
+              className="form-input"
+              placeholder="Quick project name"
+              value={quickProjectName}
+              onChange={(e) => setQuickProjectName(e.target.value)}
+            />
+            <button className="btn btn-secondary" onClick={handleQuickCreateProject} disabled={!token || !quickProjectName.trim()}>
+              Add
+            </button>
+          </div>
+        </div>
 
         {/* Model Selector */}
         <div>
@@ -726,6 +896,20 @@ export default function StudioPage() {
               </option>
             ))}
           </select>
+        </div>
+
+        <div>
+          <label className="form-label">Variations</label>
+          <select className="form-select" value={variations} onChange={(e) => setVariations(Number(e.target.value))}>
+            {[1, 2, 3, 4].map((count) => (
+              <option key={count} value={count}>
+                {count} {count === 1 ? 'output' : 'outputs'}
+              </option>
+            ))}
+          </select>
+          <p style={{ color: 'var(--foreground-muted)', fontSize: '0.75rem', marginTop: '0.5rem', marginBottom: 0 }}>
+            Credit estimate: {baseCredits} base + {Math.max(0, variations - 1)} variation{variations === 2 ? '' : 's'} = {totalCredits}
+          </p>
         </div>
 
         {/* Duration Slider */}

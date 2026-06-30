@@ -153,6 +153,9 @@ export default function LibraryPage() {
           {filteredAssets.map((asset, index) => (
             <article key={asset.id} className="asset-card">
               <div className="asset-preview" style={{ background: gradients[index % gradients.length] }}>
+                {asset.thumbnailUrl && (
+                  <img src={asset.thumbnailUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                )}
                 <span className="asset-tag" style={{ textTransform: 'capitalize' }}>
                   {asset.type === 'video' ? '🎬 Video' : '🖼️ Image'}
                 </span>

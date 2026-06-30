@@ -2,6 +2,8 @@ import { Queue, Worker, Job } from 'bullmq';
 import IORedis from 'ioredis';
 import { PrismaClient } from '@prisma/client';
 import { ReplicateService } from './replicate.service';
+import { createAssetForPrediction, createThumbnailForAsset, storeExistingAssetIfNeeded } from './asset.service';
+import { storageService } from './storage.service';
 
 const prisma = new PrismaClient();
 const replicateService = new ReplicateService();
@@ -60,6 +62,51 @@ export class QueueService {
   }
 
   public async resumeIncompleteJobs(): Promise<void> {
+    if (storageService.isConfigured()) {
+      const unstoredAssets = await prisma.asset.findMany({
+        where: {
+          storageObjectId: null,
+          userId: { not: null },
+        },
+        select: {
+          id: true,
+          userId: true,
+          predictionId: true,
+          url: true,
+          type: true,
+        },
+        take: 25,
+      });
+
+      let storedCount = 0;
+      for (const asset of unstoredAssets) {
+        try {
+          if (await storeExistingAssetIfNeeded(asset)) {
+            storedCount++;
+          }
+        } catch (error) {
+          console.error(`Failed backfilling asset ${asset.id} into durable storage:`, error);
+        }
+      }
+
+      if (storedCount > 0) {
+        console.log(`Backfilled ${storedCount} asset(s) into durable storage.`);
+      }
+    } else {
+      console.log('Durable storage is not configured. Generated assets will use provider URLs.');
+    }
+
+    const assetsWithoutThumbnails = await prisma.asset.findMany({
+      where: { thumbnailUrl: null, userId: { not: null } },
+      select: { id: true, userId: true, url: true, type: true, thumbnailUrl: true },
+      take: 25,
+    });
+    let thumbnailCount = 0;
+    for (const asset of assetsWithoutThumbnails) {
+      if (await createThumbnailForAsset(asset)) thumbnailCount++;
+    }
+    if (thumbnailCount > 0) console.log(`Generated ${thumbnailCount} missing asset thumbnail(s).`);
+
     const completedWithoutAssets = await prisma.prediction.findMany({
       where: {
         status: 'succeeded',
@@ -72,14 +119,7 @@ export class QueueService {
     for (const prediction of completedWithoutAssets) {
       if (!prediction.outputUrl || !prediction.userId) continue;
 
-      await prisma.asset.create({
-        data: {
-          userId: prediction.userId,
-          predictionId: prediction.id,
-          url: prediction.outputUrl,
-          type: prediction.workflow === 'text-to-image' ? 'image' : 'video',
-        },
-      });
+      await createAssetForPrediction(prediction, prediction.outputUrl);
     }
 
     const incompletePredictions = await prisma.prediction.findMany({
@@ -160,8 +200,7 @@ export class QueueService {
           : 'processing';
     const isTerminal = status === 'succeeded' || status === 'failed';
 
-    await prisma.$transaction(async (tx) => {
-      const prediction = await tx.prediction.update({
+    const prediction = await prisma.prediction.update({
         where: { id: predictionId },
         data: {
           status,
@@ -171,24 +210,9 @@ export class QueueService {
         },
       });
 
-      if (status === 'succeeded' && prediction.outputUrl && prediction.userId) {
-        const existingAsset = await tx.asset.findFirst({
-          where: { predictionId: prediction.id },
-          select: { id: true },
-        });
-
-        if (!existingAsset) {
-          await tx.asset.create({
-            data: {
-              userId: prediction.userId,
-              predictionId: prediction.id,
-              url: prediction.outputUrl,
-              type: prediction.workflow === 'text-to-image' ? 'image' : 'video',
-            },
-          });
-        }
-      }
-    });
+    if (status === 'succeeded' && prediction.outputUrl) {
+      await createAssetForPrediction(prediction, prediction.outputUrl);
+    }
 
     return isTerminal;
   }

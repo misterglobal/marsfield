@@ -5,6 +5,9 @@ const client_1 = require("@prisma/client");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const replicate_service_1 = require("../services/replicate.service");
 const queue_service_1 = require("../services/queue.service");
+const billing_service_1 = require("../services/billing.service");
+const crypto_1 = require("crypto");
+const asset_service_1 = require("../services/asset.service");
 const router = (0, express_1.Router)();
 const prisma = new client_1.PrismaClient();
 const replicateService = new replicate_service_1.ReplicateService();
@@ -47,17 +50,39 @@ function decodeFileList(value, maximum, maximumBytes, label) {
     }
     return value.map((item) => decodeFileInput(item, maximumBytes));
 }
+async function resolveOwnedStorageObjects(userId, value, maximum, allowedPrefix, label) {
+    if (value === undefined)
+        return undefined;
+    if (!Array.isArray(value) || value.length > maximum || value.some((id) => typeof id !== 'string')) {
+        throw new Error(`${label} accepts at most ${maximum} stored files`);
+    }
+    if (value.length === 0)
+        return [];
+    const objects = await prisma.storageObject.findMany({
+        where: { id: { in: value }, userId },
+        select: { id: true, url: true, mimeType: true },
+    });
+    const byId = new Map(objects.map((object) => [object.id, object]));
+    return value.map((id) => {
+        const object = byId.get(id);
+        if (!object || !object.mimeType?.startsWith(allowedPrefix)) {
+            throw new Error(`${label} contains a missing, unauthorized, or invalid file`);
+        }
+        return object.url;
+    });
+}
+async function resolveOwnedStorageObject(userId, value, allowedPrefix, label) {
+    if (value === undefined || value === null || value === '')
+        return undefined;
+    const [url] = await resolveOwnedStorageObjects(userId, [value], 1, allowedPrefix, label) || [];
+    return url;
+}
 // POST /api/v1/generate
 router.post('/generate', auth_middleware_1.authMiddleware, async (req, res) => {
     try {
         const user = req.user;
         if (!user) {
             res.status(401).json({ error: 'Unauthorized' });
-            return;
-        }
-        // Check credits
-        if (user.creditsUsed >= user.creditsLimit) {
-            res.status(403).json({ error: 'Generation quota exceeded. Please upgrade plan.' });
             return;
         }
         const { workflow, model, prompt, params } = req.body;
@@ -82,6 +107,16 @@ router.post('/generate', auth_middleware_1.authMiddleware, async (req, res) => {
             res.status(400).json({ error: 'Invalid model identifier' });
             return;
         }
+        const billingQuote = (0, billing_service_1.quoteGeneration)({ workflow, model, params });
+        const remainingCredits = user.creditsLimit - user.creditsUsed;
+        if (billingQuote.totalCredits > remainingCredits) {
+            res.status(403).json({
+                error: 'Generation quota exceeded. Please upgrade plan.',
+                credits_required: billingQuote.totalCredits,
+                credits_remaining: Math.max(0, remainingCredits),
+            });
+            return;
+        }
         const isSeedance = SEEDANCE_MODELS.has(model);
         if (workflow === 'multimodal-video' && !isSeedance) {
             res.status(400).json({ error: 'The multimodal-video workflow requires a Seedance 2.0 model' });
@@ -104,6 +139,21 @@ router.post('/generate', auth_middleware_1.authMiddleware, async (req, res) => {
                 if (!validResolutions.includes(params?.resolution || '720p')) {
                     throw new Error(`Invalid resolution for ${model}`);
                 }
+                const referenceImages = params?.reference_image_ids
+                    ? await resolveOwnedStorageObjects(user.id, params.reference_image_ids, 9, 'image/', 'Reference images')
+                    : decodeFileList(params?.reference_images, 9, 10 * 1024 * 1024, 'Reference images');
+                const referenceVideos = params?.reference_video_ids
+                    ? await resolveOwnedStorageObjects(user.id, params.reference_video_ids, 3, 'video/', 'Reference videos')
+                    : decodeFileList(params?.reference_videos, 3, 25 * 1024 * 1024, 'Reference videos');
+                const referenceAudio = params?.reference_audio_ids
+                    ? await resolveOwnedStorageObjects(user.id, params.reference_audio_ids, 3, 'audio/', 'Reference audio')
+                    : decodeFileList(params?.reference_audio, 3, 25 * 1024 * 1024, 'Reference audio');
+                const firstFrameImage = params?.first_frame_image_id
+                    ? await resolveOwnedStorageObject(user.id, params.first_frame_image_id, 'image/', 'First frame')
+                    : params?.first_frame_image ? decodeFileInput(params.first_frame_image, 10 * 1024 * 1024) : undefined;
+                const lastFrameImage = params?.last_frame_image_id
+                    ? await resolveOwnedStorageObject(user.id, params.last_frame_image_id, 'image/', 'Last frame')
+                    : params?.last_frame_image ? decodeFileInput(params.last_frame_image, 10 * 1024 * 1024) : undefined;
                 predictionInput = {
                     prompt,
                     duration,
@@ -111,18 +161,35 @@ router.post('/generate', auth_middleware_1.authMiddleware, async (req, res) => {
                     aspect_ratio: params?.aspect_ratio || '16:9',
                     generate_audio: params?.generate_audio !== false,
                     seed: Number.isInteger(params?.seed) ? params.seed : undefined,
-                    reference_images: decodeFileList(params?.reference_images, 9, 10 * 1024 * 1024, 'Reference images'),
-                    reference_videos: decodeFileList(params?.reference_videos, 3, 25 * 1024 * 1024, 'Reference videos'),
-                    reference_audio: decodeFileList(params?.reference_audio, 3, 25 * 1024 * 1024, 'Reference audio'),
-                    first_frame_image: params?.first_frame_image
-                        ? decodeFileInput(params.first_frame_image, 10 * 1024 * 1024)
-                        : undefined,
-                    last_frame_image: params?.last_frame_image
-                        ? decodeFileInput(params.last_frame_image, 10 * 1024 * 1024)
-                        : undefined,
+                    reference_images: referenceImages,
+                    reference_videos: referenceVideos,
+                    reference_audio: referenceAudio,
+                    first_frame_image: firstFrameImage,
+                    last_frame_image: lastFrameImage,
+                };
+            }
+            else if (workflow === 'lip-sync') {
+                const image = await resolveOwnedStorageObject(user.id, req.body.image_storage_object_id, 'image/', 'Lip-sync image');
+                const audio = await resolveOwnedStorageObject(user.id, req.body.audio_storage_object_id, 'audio/', 'Lip-sync audio');
+                if (!image || !audio)
+                    throw new Error('Lip-sync requires a stored image and audio file');
+                if (!['bytedance/omni-human', 'bytedance/omni-human-1.5'].includes(model)) {
+                    throw new Error('Selected model does not support uploaded image and audio lip-sync');
+                }
+                predictionInput = {
+                    image,
+                    audio,
+                    prompt: model === 'bytedance/omni-human-1.5' ? prompt || undefined : undefined,
+                    seed: Number.isInteger(params?.seed) ? params.seed : undefined,
+                    fast_mode: model === 'bytedance/omni-human-1.5' ? params?.fast_mode === true : undefined,
                 };
             }
             else {
+                const image = workflow === 'image-to-video'
+                    ? await resolveOwnedStorageObject(user.id, req.body.image_storage_object_id, 'image/', 'Input image')
+                    : undefined;
+                if (workflow === 'image-to-video' && !image)
+                    throw new Error('Image-to-video requires a stored image');
                 predictionInput = {
                     prompt,
                     aspect_ratio: params?.aspect_ratio,
@@ -130,7 +197,7 @@ router.post('/generate', auth_middleware_1.authMiddleware, async (req, res) => {
                     fps: params?.fps,
                     camera_move: params?.camera_move,
                     motion_strength: params?.motion_strength,
-                    image: req.body.image,
+                    image,
                 };
             }
         }
@@ -138,67 +205,129 @@ router.post('/generate', auth_middleware_1.authMiddleware, async (req, res) => {
             res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid generation parameters' });
             return;
         }
-        // Call replicate client wrapper
-        const webhookUrl = process.env.WEBHOOK_BASE_URL
-            ? `${process.env.WEBHOOK_BASE_URL}/api/v1/webhooks/replicate`
-            : undefined;
-        const repPrediction = await replicateService.createPrediction(model, predictionInput, webhookUrl);
-        // Save Prediction in DB
-        const prediction = await prisma.prediction.create({
-            data: {
-                userId: user.id,
-                workflow,
-                model,
-                prompt: prompt || null,
-                inputParams: isSeedance
-                    ? {
-                        duration: params?.duration ?? 5,
-                        resolution: params?.resolution || '720p',
-                        aspect_ratio: params?.aspect_ratio || '16:9',
-                        generate_audio: params?.generate_audio !== false,
-                        seed: Number.isInteger(params?.seed) ? params.seed : null,
-                        reference_image_count: params?.reference_images?.length || 0,
-                        reference_video_count: params?.reference_videos?.length || 0,
-                        reference_audio_count: params?.reference_audio?.length || 0,
-                        has_first_frame: Boolean(params?.first_frame_image),
-                        has_last_frame: Boolean(params?.last_frame_image),
-                    }
-                    : params || null,
-                status: repPrediction.status,
-                replicatePredictionId: repPrediction.id,
-                outputUrl: repPrediction.outputUrl || null,
-                completedAt: repPrediction.status === 'succeeded' ? new Date() : null,
-            },
-        });
-        // Deduct 1 credit
-        await prisma.user.update({
-            where: { id: user.id },
-            data: { creditsUsed: { increment: 1 } },
-        });
-        // Register job inside queue tracker (for async checks if not webhook verified)
-        if (repPrediction.status !== 'succeeded') {
-            await queue_service_1.queueService.addGenerationJob({
-                predictionId: prediction.id,
-                replicatePredictionId: repPrediction.id,
-                model,
+        const projectId = typeof req.body.project_id === 'string' ? req.body.project_id : undefined;
+        const storyboardSceneId = typeof req.body.storyboard_scene_id === 'string' ? req.body.storyboard_scene_id : undefined;
+        if (projectId) {
+            const project = await prisma.project.findFirst({
+                where: { id: projectId, userId: user.id },
+                select: { id: true },
             });
+            if (!project) {
+                res.status(404).json({ error: 'Project not found' });
+                return;
+            }
         }
-        else if (repPrediction.outputUrl) {
-            // Create user asset immediately if succeeded synchronously
-            await prisma.asset.create({
+        if (storyboardSceneId) {
+            const scene = await prisma.storyboardScene.findFirst({
+                where: { id: storyboardSceneId, project: { userId: user.id } },
+                select: { id: true, projectId: true },
+            });
+            if (!scene || (projectId && scene.projectId !== projectId)) {
+                res.status(404).json({ error: 'Storyboard scene not found' });
+                return;
+            }
+        }
+        // Call replicate client wrapper
+        const webhookBaseUrl = process.env.WEBHOOK_BASE_URL;
+        const webhookUrl = webhookBaseUrl?.startsWith('https://')
+            ? `${webhookBaseUrl.replace(/\/+$/, '')}/api/v1/webhooks/replicate`
+            : undefined;
+        const variationGroupId = billingQuote.variationCount > 1 ? (0, crypto_1.randomUUID)() : undefined;
+        const submittedPredictions = [];
+        for (let variationIndex = 0; variationIndex < billingQuote.variationCount; variationIndex++) {
+            const variantInput = {
+                ...predictionInput,
+                seed: Number.isInteger(predictionInput.seed)
+                    ? predictionInput.seed + variationIndex
+                    : predictionInput.seed,
+            };
+            const repPrediction = await replicateService.createPrediction(model, variantInput, webhookUrl);
+            // Save Prediction in DB
+            const prediction = await prisma.prediction.create({
                 data: {
                     userId: user.id,
-                    predictionId: prediction.id,
-                    url: repPrediction.outputUrl,
-                    type: workflow === 'text-to-image' ? 'image' : 'video',
+                    projectId,
+                    storyboardSceneId,
+                    workflow,
+                    model,
+                    prompt: prompt || null,
+                    inputParams: isSeedance
+                        ? {
+                            duration: params?.duration ?? 5,
+                            resolution: params?.resolution || '720p',
+                            aspect_ratio: params?.aspect_ratio || '16:9',
+                            generate_audio: params?.generate_audio !== false,
+                            seed: Number.isInteger(params?.seed) ? params.seed + variationIndex : null,
+                            reference_image_count: params?.reference_image_ids?.length || params?.reference_images?.length || 0,
+                            reference_video_count: params?.reference_video_ids?.length || params?.reference_videos?.length || 0,
+                            reference_audio_count: params?.reference_audio_ids?.length || params?.reference_audio?.length || 0,
+                            has_first_frame: Boolean(params?.first_frame_image_id || params?.first_frame_image),
+                            has_last_frame: Boolean(params?.last_frame_image_id || params?.last_frame_image),
+                        }
+                        : {
+                            ...(params || {}),
+                            seed: Number.isInteger(params?.seed)
+                                ? (params.seed + variationIndex)
+                                : params?.seed,
+                        },
+                    variationGroupId,
+                    variationIndex,
+                    variationCount: billingQuote.variationCount,
+                    creditCost: variationIndex === 0 ? billingQuote.baseCredits : Math.ceil(billingQuote.baseCredits * 0.75),
+                    status: repPrediction.status,
+                    replicatePredictionId: repPrediction.id,
+                    outputUrl: repPrediction.outputUrl || null,
+                    completedAt: repPrediction.status === 'succeeded' ? new Date() : null,
                 },
             });
+            submittedPredictions.push(prediction);
+            // Register job inside queue tracker (for async checks if not webhook verified)
+            if (repPrediction.status !== 'succeeded') {
+                await queue_service_1.queueService.addGenerationJob({
+                    predictionId: prediction.id,
+                    replicatePredictionId: repPrediction.id,
+                    model,
+                });
+            }
+            else if (repPrediction.outputUrl) {
+                // Create user asset immediately if succeeded synchronously
+                await (0, asset_service_1.createAssetForPrediction)(prediction, repPrediction.outputUrl);
+            }
         }
+        await prisma.$transaction([
+            prisma.user.update({
+                where: { id: user.id },
+                data: { creditsUsed: { increment: billingQuote.totalCredits } },
+            }),
+            prisma.usageEvent.create({
+                data: {
+                    userId: user.id,
+                    predictionId: submittedPredictions[0]?.id,
+                    eventType: 'generation',
+                    credits: billingQuote.totalCredits,
+                    metadata: {
+                        workflow,
+                        model,
+                        variation_count: billingQuote.variationCount,
+                        variation_group_id: variationGroupId,
+                    },
+                },
+            }),
+        ]);
+        const primaryPrediction = submittedPredictions[0];
         res.status(201).json({
-            id: prediction.id,
-            status: prediction.status,
-            output_url: prediction.outputUrl,
-            created_at: prediction.createdAt,
+            id: primaryPrediction.id,
+            status: primaryPrediction.status,
+            output_url: primaryPrediction.outputUrl,
+            created_at: primaryPrediction.createdAt,
+            credits_charged: billingQuote.totalCredits,
+            variation_group_id: variationGroupId,
+            predictions: submittedPredictions.map((prediction) => ({
+                id: prediction.id,
+                status: prediction.status,
+                output_url: prediction.outputUrl,
+                variation_index: prediction.variationIndex,
+            })),
         });
     }
     catch (error) {
