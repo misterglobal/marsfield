@@ -21,6 +21,8 @@ function getBaseCredits(input) {
         return 3;
     if (input.model === 'bytedance/seedance-2.0')
         return 4;
+    if (input.model === 'kwaivgi/kling-v3-omni-video')
+        return 5;
     if (input.workflow.includes('video') || input.workflow === 'lip-sync')
         return 3;
     return 1;

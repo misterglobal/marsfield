@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
+import { getPlan } from '../src/services/freemius.service';
 
 const prisma = new PrismaClient();
 
@@ -15,14 +16,16 @@ async function main() {
   
   // Create default mock user
   const passwordHash = await hashPassword('password123');
+  const freePlan = getPlan('free');
   const user = await prisma.user.create({
     data: {
       email: 'creator@marsfield.ai',
       passwordHash: passwordHash,
       name: 'Marsfield Creator',
       plan: 'free',
-      creditsUsed: 2,
-      creditsLimit: 1000,
+      creditsUsed: 0,
+      creditsLimit: freePlan.creditsLimit,
+      storageLimitBytes: freePlan.storageLimitBytes,
     },
   });
 

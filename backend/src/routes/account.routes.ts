@@ -2,9 +2,11 @@ import { Router, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { randomBytes, createHash } from 'crypto';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.middleware';
+import { buildFreemiusCheckoutUrl, getPlan, PLAN_CONFIG, PlanTier, serializePlan } from '../services/freemius.service';
 
 const router = Router();
 const prisma = new PrismaClient();
+const BILLABLE_TIERS = new Set<PlanTier>(['starter', 'creator', 'pro', 'studio']);
 
 function hashApiKey(key: string): string {
   return createHash('sha256').update(key).digest('hex');
@@ -30,6 +32,8 @@ router.get('/usage', authMiddleware, async (req: AuthenticatedRequest, res: Resp
           plan: true,
           creditsUsed: true,
           creditsLimit: true,
+          storageUsageBytes: true,
+          storageLimitBytes: true,
         },
       }),
       prisma.usageEvent.findMany({
@@ -66,6 +70,9 @@ router.get('/usage', authMiddleware, async (req: AuthenticatedRequest, res: Resp
       credits_used: freshUser.creditsUsed,
       credits_limit: freshUser.creditsLimit,
       credits_remaining: Math.max(0, freshUser.creditsLimit - freshUser.creditsUsed),
+      storage_usage_bytes: freshUser.storageUsageBytes,
+      storage_limit_bytes: freshUser.storageLimitBytes.toString(),
+      storage_remaining_bytes: (freshUser.storageLimitBytes - BigInt(freshUser.storageUsageBytes)).toString(),
       project_count: counts[0],
       asset_count: counts[1],
       durable_asset_count: counts[2],
@@ -81,6 +88,50 @@ router.get('/usage', authMiddleware, async (req: AuthenticatedRequest, res: Resp
   } catch (error) {
     console.error('Fetch account usage error:', error);
     res.status(500).json({ error: 'Failed retrieving account usage' });
+  }
+});
+
+// GET /api/v1/account/plans
+router.get('/plans', authMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
+  res.json(Object.values(PLAN_CONFIG).map(serializePlan));
+});
+
+// POST /api/v1/account/billing/checkout
+router.post('/billing/checkout', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    if (req.authType !== 'jwt') {
+      res.status(403).json({ error: 'Checkout must be started from an authenticated browser session' });
+      return;
+    }
+
+    const tier = String(req.body.tier || '').toLowerCase() as PlanTier;
+    if (!BILLABLE_TIERS.has(tier)) {
+      res.status(400).json({ error: 'Choose a paid plan: starter, creator, pro, or studio' });
+      return;
+    }
+
+    const appUrl = (process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
+    const url = buildFreemiusCheckoutUrl({
+      tier,
+      email: user.email,
+      userId: user.id,
+      successUrl: process.env.FREEMIUS_SUCCESS_URL || `${appUrl}/settings?billing=success`,
+      cancelUrl: process.env.FREEMIUS_CANCEL_URL || `${appUrl}/settings?billing=cancelled`,
+    });
+    const plan = getPlan(tier);
+
+    res.json({
+      checkout_url: url,
+      plan: serializePlan(plan),
+    });
+  } catch (error) {
+    console.error('Create Freemius checkout error:', error);
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Failed creating checkout link' });
   }
 });
 

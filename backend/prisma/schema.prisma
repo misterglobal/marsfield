@@ -14,8 +14,9 @@ model User {
   name         String?
   plan         String       @default("free")
   creditsUsed  Int          @default(0) @map("credits_used")
-  creditsLimit Int          @default(10) @map("credits_limit")
+  creditsLimit Int          @default(15) @map("credits_limit")
   storageUsageBytes Int     @default(0) @map("storage_usage_bytes")
+  storageLimitBytes BigInt  @default(1073741824) @map("storage_limit_bytes")
   createdAt    DateTime     @default(now()) @map("created_at")
   projects     Project[]
   predictions  Prediction[]
@@ -24,6 +25,8 @@ model User {
   usageEvents  UsageEvent[]
   storageObjects StorageObject[]
   brandKits    BrandKit[]
+  freemiusEntitlements FreemiusEntitlement[]
+  billingEvents BillingEvent[]
 
   @@map("users")
 }
@@ -147,6 +150,40 @@ model UsageEvent {
 
   @@index([userId, createdAt])
   @@map("usage_events")
+}
+
+model FreemiusEntitlement {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  user        User      @relation(fields: [userId], references: [id])
+  fsLicenseId String    @unique @map("fs_license_id")
+  fsPlanId    String?   @map("fs_plan_id")
+  fsPricingId String?   @map("fs_pricing_id")
+  fsUserId    String?   @map("fs_user_id")
+  type        String?
+  expiration  DateTime?
+  isCanceled  Boolean   @default(false) @map("is_canceled")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@index([userId, isCanceled])
+  @@index([fsPlanId])
+  @@map("freemius_entitlements")
+}
+
+model BillingEvent {
+  id          String   @id @default(uuid())
+  userId      String?  @map("user_id")
+  user        User?    @relation(fields: [userId], references: [id])
+  provider    String   @default("freemius")
+  providerEventId String? @unique @map("provider_event_id")
+  eventType   String   @map("event_type")
+  payload     Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@index([eventType, createdAt])
+  @@map("billing_events")
 }
 
 model BrandKit {

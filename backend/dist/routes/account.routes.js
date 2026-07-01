@@ -4,8 +4,10 @@ const express_1 = require("express");
 const client_1 = require("@prisma/client");
 const crypto_1 = require("crypto");
 const auth_middleware_1 = require("../middleware/auth.middleware");
+const freemius_service_1 = require("../services/freemius.service");
 const router = (0, express_1.Router)();
 const prisma = new client_1.PrismaClient();
+const BILLABLE_TIERS = new Set(['starter', 'creator', 'pro', 'studio']);
 function hashApiKey(key) {
     return (0, crypto_1.createHash)('sha256').update(key).digest('hex');
 }
@@ -27,6 +29,8 @@ router.get('/usage', auth_middleware_1.authMiddleware, async (req, res) => {
                     plan: true,
                     creditsUsed: true,
                     creditsLimit: true,
+                    storageUsageBytes: true,
+                    storageLimitBytes: true,
                 },
             }),
             prisma.usageEvent.findMany({
@@ -61,6 +65,9 @@ router.get('/usage', auth_middleware_1.authMiddleware, async (req, res) => {
             credits_used: freshUser.creditsUsed,
             credits_limit: freshUser.creditsLimit,
             credits_remaining: Math.max(0, freshUser.creditsLimit - freshUser.creditsUsed),
+            storage_usage_bytes: freshUser.storageUsageBytes,
+            storage_limit_bytes: freshUser.storageLimitBytes.toString(),
+            storage_remaining_bytes: (freshUser.storageLimitBytes - BigInt(freshUser.storageUsageBytes)).toString(),
             project_count: counts[0],
             asset_count: counts[1],
             durable_asset_count: counts[2],
@@ -77,6 +84,46 @@ router.get('/usage', auth_middleware_1.authMiddleware, async (req, res) => {
     catch (error) {
         console.error('Fetch account usage error:', error);
         res.status(500).json({ error: 'Failed retrieving account usage' });
+    }
+});
+// GET /api/v1/account/plans
+router.get('/plans', auth_middleware_1.authMiddleware, async (_req, res) => {
+    res.json(Object.values(freemius_service_1.PLAN_CONFIG).map(freemius_service_1.serializePlan));
+});
+// POST /api/v1/account/billing/checkout
+router.post('/billing/checkout', auth_middleware_1.authMiddleware, async (req, res) => {
+    try {
+        const user = req.user;
+        if (!user) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+        if (req.authType !== 'jwt') {
+            res.status(403).json({ error: 'Checkout must be started from an authenticated browser session' });
+            return;
+        }
+        const tier = String(req.body.tier || '').toLowerCase();
+        if (!BILLABLE_TIERS.has(tier)) {
+            res.status(400).json({ error: 'Choose a paid plan: starter, creator, pro, or studio' });
+            return;
+        }
+        const appUrl = (process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
+        const url = (0, freemius_service_1.buildFreemiusCheckoutUrl)({
+            tier,
+            email: user.email,
+            userId: user.id,
+            successUrl: process.env.FREEMIUS_SUCCESS_URL || `${appUrl}/settings?billing=success`,
+            cancelUrl: process.env.FREEMIUS_CANCEL_URL || `${appUrl}/settings?billing=cancelled`,
+        });
+        const plan = (0, freemius_service_1.getPlan)(tier);
+        res.json({
+            checkout_url: url,
+            plan: (0, freemius_service_1.serializePlan)(plan),
+        });
+    }
+    catch (error) {
+        console.error('Create Freemius checkout error:', error);
+        res.status(500).json({ error: error instanceof Error ? error.message : 'Failed creating checkout link' });
     }
 });
 // GET /api/v1/account/api-keys

@@ -15,6 +15,10 @@ export interface PredictionInput {
   reference_audio?: Array<string | Blob>;
   first_frame_image?: string | Blob;
   last_frame_image?: string | Blob;
+  reference_video?: string;
+  video_reference_type?: 'feature' | 'base';
+  keep_original_sound?: boolean;
+  mode?: string;
   [key: string]: unknown;
 }
 

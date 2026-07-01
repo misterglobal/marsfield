@@ -8,6 +8,7 @@ const queue_service_1 = require("../services/queue.service");
 const billing_service_1 = require("../services/billing.service");
 const crypto_1 = require("crypto");
 const asset_service_1 = require("../services/asset.service");
+const media_probe_service_1 = require("../services/media-probe.service");
 const router = (0, express_1.Router)();
 const prisma = new client_1.PrismaClient();
 const replicateService = new replicate_service_1.ReplicateService();
@@ -92,7 +93,7 @@ router.post('/generate', auth_middleware_1.authMiddleware, async (req, res) => {
             return;
         }
         // Validate workflow
-        const validWorkflows = ['text-to-video', 'image-to-video', 'lip-sync', 'text-to-image', 'multi-image-video', 'multimodal-video'];
+        const validWorkflows = ['text-to-video', 'image-to-video', 'lip-sync', 'text-to-image', 'multi-image-video', 'multimodal-video', 'character-replace'];
         if (!validWorkflows.includes(workflow)) {
             res.status(400).json({ error: 'Invalid workflow type' });
             return;
@@ -166,6 +167,34 @@ router.post('/generate', auth_middleware_1.authMiddleware, async (req, res) => {
                     reference_audio: referenceAudio,
                     first_frame_image: firstFrameImage,
                     last_frame_image: lastFrameImage,
+                };
+            }
+            else if (workflow === 'character-replace') {
+                if (model !== 'kwaivgi/kling-v3-omni-video') {
+                    throw new Error('Character replacement requires Kling V3 Omni Video');
+                }
+                const [referenceImage] = await resolveOwnedStorageObjects(user.id, params?.reference_image_ids, 1, 'image/', 'Character reference image') || [];
+                const referenceVideo = await resolveOwnedStorageObject(user.id, params?.reference_video_id, 'video/', 'Reference video');
+                if (!referenceImage || !referenceVideo) {
+                    throw new Error('Character replacement requires one reference image and one reference video');
+                }
+                const referenceDuration = await (0, media_probe_service_1.getRemoteVideoDuration)(referenceVideo);
+                if (referenceDuration < 3 || referenceDuration > 10.05) {
+                    throw new Error(`Reference video must be between 3 and 10 seconds (received ${referenceDuration.toFixed(1)}s)`);
+                }
+                const mode = params?.mode || 'pro';
+                if (!['standard', 'pro'].includes(mode))
+                    throw new Error('Kling mode must be standard or pro');
+                predictionInput = {
+                    prompt: prompt || 'Replace the person in <<<video_1>>> with the person from <<<image_1>>>, preserving the original motion, framing, lighting, and scene.',
+                    reference_images: [referenceImage],
+                    reference_video: referenceVideo,
+                    video_reference_type: 'base',
+                    mode,
+                    duration: 15,
+                    aspect_ratio: params?.aspect_ratio || '16:9',
+                    generate_audio: false,
+                    keep_original_sound: params?.keep_original_sound !== false,
                 };
             }
             else if (workflow === 'lip-sync') {

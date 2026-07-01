@@ -92,6 +92,11 @@ export const api = {
 
   // Account
   getUsage: () => request('/account/usage'),
+  getPlans: () => request('/account/plans'),
+  createCheckout: (payload: any) => request('/account/billing/checkout', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
   getApiKeys: () => request('/account/api-keys'),
   createApiKey: (payload: any) => request('/account/api-keys', {
     method: 'POST',

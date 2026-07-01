@@ -17,6 +17,9 @@ interface UsageSummary {
   credits_used: number;
   credits_limit: number;
   credits_remaining: number;
+  storage_usage_bytes?: number;
+  storage_limit_bytes?: string;
+  storage_remaining_bytes?: string;
   project_count: number;
   asset_count: number;
   recent_usage: Array<{
@@ -33,26 +36,40 @@ interface UsageSummary {
   }>;
 }
 
+interface PlanSummary {
+  tier: string;
+  name: string;
+  price_usd: number;
+  credits_limit: number;
+  storage_limit_bytes: string;
+  retention_days?: number;
+  freemius_configured: boolean;
+}
+
 export default function SettingsPage() {
   const { token } = useAuth();
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [usage, setUsage] = useState<UsageSummary | null>(null);
+  const [plans, setPlans] = useState<PlanSummary[]>([]);
   const [newKeyName, setNewKeyName] = useState('');
   const [newlyCreatedKey, setNewlyCreatedKey] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [checkoutTier, setCheckoutTier] = useState('');
 
   const loadSettings = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     setError('');
     try {
-      const [usageData, keysData] = await Promise.all([
+      const [usageData, keysData, plansData] = await Promise.all([
         api.getUsage(),
         api.getApiKeys(),
+        api.getPlans(),
       ]);
       setUsage(usageData);
       setApiKeys(keysData);
+      setPlans(plansData);
     } catch (err: any) {
       setError(err.message || 'Failed to load settings');
     } finally {
@@ -91,6 +108,18 @@ export default function SettingsPage() {
     }
   };
 
+  const handleCheckout = async (tier: string) => {
+    setError('');
+    setCheckoutTier(tier);
+    try {
+      const checkout = await api.createCheckout({ tier });
+      window.location.href = checkout.checkout_url;
+    } catch (err: any) {
+      setError(err.message || 'Failed to start checkout');
+      setCheckoutTier('');
+    }
+  };
+
   if (!token) {
     return (
       <div className="glass-card" style={{ padding: '4rem', textAlign: 'center' }}>
@@ -100,6 +129,16 @@ export default function SettingsPage() {
   }
 
   const usedPercent = usage ? Math.min(100, Math.round((usage.credits_used / Math.max(1, usage.credits_limit)) * 100)) : 0;
+  const storageLimitBytes = Number(usage?.storage_limit_bytes || 0);
+  const storageUsedBytes = usage?.storage_usage_bytes || 0;
+  const storageUsedPercent = storageLimitBytes ? Math.min(100, Math.round((storageUsedBytes / storageLimitBytes) * 100)) : 0;
+  const formatBytes = (value: number | string | undefined) => {
+    const bytes = typeof value === 'string' ? Number(value) : value || 0;
+    if (!bytes) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const index = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+    return `${(bytes / Math.pow(1024, index)).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+  };
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: '2rem' }}>
@@ -187,6 +226,41 @@ export default function SettingsPage() {
         </section>
 
         <section className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <h3 style={{ fontSize: '1.15rem', fontWeight: 700 }}>Subscription Tiers</h3>
+          <p style={{ color: 'var(--foreground-muted)', fontSize: '0.85rem', margin: 0 }}>
+            Plans are handled through Freemius. Marsfield grants monthly credits and storage after the signed Freemius webhook confirms the purchase.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.85rem' }}>
+            {plans.map((plan) => {
+              const isCurrent = usage?.plan?.toLowerCase() === plan.tier;
+              const isFree = plan.tier === 'free';
+              return (
+                <div key={plan.tier} style={{ padding: '1rem', borderRadius: '12px', border: isCurrent ? '1px solid var(--primary)' : '1px solid var(--panel-border)', background: isCurrent ? 'rgba(139, 92, 246, 0.08)' : 'rgba(255,255,255,0.02)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.5rem' }}>
+                    <strong>{plan.name}</strong>
+                    <span style={{ color: 'var(--primary)', fontWeight: 700 }}>${plan.price_usd}</span>
+                  </div>
+                  <p style={{ color: 'var(--foreground-muted)', fontSize: '0.8rem', margin: '0.5rem 0' }}>
+                    {plan.credits_limit.toLocaleString()} credits · {formatBytes(plan.storage_limit_bytes)}
+                    {plan.retention_days ? ` · ${plan.retention_days}-day retention` : ''}
+                  </p>
+                  {!isFree && (
+                    <button
+                      className="btn btn-primary"
+                      disabled={checkoutTier === plan.tier || isCurrent || !plan.freemius_configured}
+                      onClick={() => void handleCheckout(plan.tier)}
+                      style={{ width: '100%', padding: '0.55rem 0.75rem', fontSize: '0.8rem' }}
+                    >
+                      {isCurrent ? 'Current Plan' : checkoutTier === plan.tier ? 'Opening…' : plan.freemius_configured ? 'Subscribe' : 'Configure Plan ID'}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <h3 style={{ fontSize: '1.15rem', fontWeight: 700 }}>Usage History</h3>
           {usage?.recent_usage.length ? usage.recent_usage.map((event) => (
             <div key={event.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', padding: '0.85rem 0', borderBottom: '1px solid var(--panel-border)' }}>
@@ -237,6 +311,19 @@ export default function SettingsPage() {
           </p>
         </div>
 
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--foreground-muted)', marginBottom: '0.5rem' }}>
+            <span>Storage</span>
+            <strong>{formatBytes(storageUsedBytes)} / {formatBytes(usage?.storage_limit_bytes)}</strong>
+          </div>
+          <div style={{ background: 'rgba(255,255,255,0.05)', height: '6px', borderRadius: '3px', overflow: 'hidden' }}>
+            <div style={{ width: `${storageUsedPercent}%`, height: '100%', background: 'var(--accent-gradient)', borderRadius: '3px' }}></div>
+          </div>
+          <p style={{ color: 'var(--foreground-muted)', fontSize: '0.75rem' }}>
+            Generated assets are stored durably in R2.
+          </p>
+        </div>
+
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
           <div style={{ padding: '0.85rem', background: 'rgba(255,255,255,0.03)', borderRadius: '10px' }}>
             <strong>{usage?.project_count ?? 0}</strong>
@@ -248,8 +335,8 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => alert('Checkout is not connected yet.')}>
-          Upgrade Plan
+        <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
+          View Plans
         </button>
       </aside>
     </div>

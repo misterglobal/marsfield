@@ -7,10 +7,10 @@ import { storageService } from '../services/storage.service';
 
 const router = Router();
 const prisma = new PrismaClient();
-const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
 const allowedMimeTypes = new Set([
   'image/jpeg', 'image/png', 'image/webp',
-  'video/mp4', 'video/webm',
+  'video/mp4', 'video/quicktime', 'video/webm',
   'audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/aac', 'audio/x-m4a',
 ]);
 

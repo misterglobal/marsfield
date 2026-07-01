@@ -36,6 +36,9 @@ export default function StudioPage() {
   const [resolution, setResolution] = useState('720p');
   const [aspectRatio, setAspectRatio] = useState('16:9');
   const [generateAudio, setGenerateAudio] = useState(true);
+  const [klingMode, setKlingMode] = useState('pro');
+  const [keepOriginalSound, setKeepOriginalSound] = useState(true);
+  const [referenceVideoDuration, setReferenceVideoDuration] = useState<number | null>(null);
   const [seed, setSeed] = useState('');
   const [variations, setVariations] = useState(1);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
@@ -70,6 +73,7 @@ export default function StudioPage() {
     { id: 'lip-sync', name: 'Lip Sync / Talking Avatar', icon: '🗣️' },
     { id: 'text-to-image', name: 'Image Generation', icon: '🎨' },
     { id: 'multimodal-video', name: 'Seedance Studio', icon: '🎞️' },
+    { id: 'character-replace', name: 'Character Replace', icon: '🎭' },
   ];
 
   const modelsForWorkflow: Record<string, { id: string; name: string; speed: string }[]> = {
@@ -95,9 +99,13 @@ export default function StudioPage() {
       { id: 'bytedance/seedance-2.0-fast', name: 'Seedance 2.0 Fast', speed: 'Fast' },
       { id: 'bytedance/seedance-2.0-mini', name: 'Seedance 2.0 Mini', speed: 'Lower Cost' },
     ],
+    'character-replace': [
+      { id: 'kwaivgi/kling-v3-omni-video', name: 'Kling V3 Omni Video', speed: 'Video Editing' },
+    ],
   };
 
   const isSeedance = workflow === 'multimodal-video';
+  const isCharacterReplace = workflow === 'character-replace';
 
   useEffect(() => {
     if (!token) {
@@ -135,6 +143,7 @@ export default function StudioPage() {
     if (model === 'bytedance/seedance-2.0-mini') return 2;
     if (model === 'bytedance/seedance-2.0-fast') return 3;
     if (model === 'bytedance/seedance-2.0') return 4;
+    if (model === 'kwaivgi/kling-v3-omni-video') return 5;
     if (workflow.includes('video') || workflow === 'lip-sync') return 3;
     return 1;
   };
@@ -153,7 +162,7 @@ export default function StudioPage() {
       throw new Error(`You can upload at most ${maximum} ${kind} files.`);
     }
 
-    const maximumSize = kind === 'image' ? 10 * 1024 * 1024 : kind === 'audio' ? 50 * 1024 * 1024 : 100 * 1024 * 1024;
+    const maximumSize = kind === 'image' ? 10 * 1024 * 1024 : kind === 'audio' ? 50 * 1024 * 1024 : 200 * 1024 * 1024;
     if (selected.some((file) => file.size > maximumSize)) {
       throw new Error(`${kind === 'image' ? 'Images' : 'Video and audio files'} must be smaller than ${maximumSize / 1024 / 1024}MB each.`);
     }
@@ -201,6 +210,49 @@ export default function StudioPage() {
     setPrompt(
       `${prompt}, cinematic lighting, photorealistic, 8k resolution, shot on 35mm lens, highly detailed textures, vibrant depth of field`
     );
+  };
+
+  const readVideoDuration = (file: File) => new Promise<number>((resolve, reject) => {
+    const video = document.createElement('video');
+    const objectUrl = URL.createObjectURL(file);
+    video.preload = 'metadata';
+    video.onloadedmetadata = () => {
+      const measured = video.duration;
+      URL.revokeObjectURL(objectUrl);
+      Number.isFinite(measured) ? resolve(measured) : reject(new Error('Could not read video duration'));
+    };
+    video.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('Could not read video metadata'));
+    };
+    video.src = objectUrl;
+  });
+
+  const handleCharacterImageUpload = async (files: FileList | null) => {
+    try {
+      setGenerationError('');
+      setReferenceImages(await uploadReferenceFiles(files, 1, 'image'));
+    } catch (error) {
+      setGenerationError(error instanceof Error ? error.message : 'Character image upload failed');
+    }
+  };
+
+  const handleCharacterVideoUpload = async (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file) return;
+    try {
+      setGenerationError('');
+      const measured = await readVideoDuration(file);
+      if (measured < 3 || measured > 10.05) {
+        throw new Error(`Reference video must be between 3 and 10 seconds. This video is ${measured.toFixed(1)} seconds.`);
+      }
+      setReferenceVideoDuration(measured);
+      setReferenceVideos(await uploadReferenceFiles(files, 1, 'video'));
+    } catch (error) {
+      setReferenceVideos([]);
+      setReferenceVideoDuration(null);
+      setGenerationError(error instanceof Error ? error.message : 'Reference video upload failed');
+    }
   };
 
   const handleQuickCreateProject = async () => {
@@ -323,7 +375,7 @@ export default function StudioPage() {
     }
     
     // Validate based on workflow
-    if (workflow === 'text-to-video' || workflow === 'text-to-image' || workflow === 'multimodal-video') {
+    if (workflow === 'text-to-video' || workflow === 'text-to-image' || workflow === 'multimodal-video' || workflow === 'character-replace') {
       if (!prompt) {
         setGenerationError('Please enter a prompt.');
         return;
@@ -338,6 +390,10 @@ export default function StudioPage() {
         setGenerationError('Please upload both image and audio files.');
         return;
       }
+    }
+    if (workflow === 'character-replace' && (!referenceImages[0] || !referenceVideos[0])) {
+      setGenerationError('Please upload one character image and a 3–10 second reference video.');
+      return;
     }
 
     // Abort previous polling if still active
@@ -381,6 +437,12 @@ export default function StudioPage() {
         generatePayload.params.reference_audio_ids = referenceAudio.map((file) => file.id);
         generatePayload.params.first_frame_image_id = firstFrame?.id;
         generatePayload.params.last_frame_image_id = lastFrame?.id;
+      } else if (isCharacterReplace) {
+        generatePayload.params.reference_image_ids = referenceImages.slice(0, 1).map((file) => file.id);
+        generatePayload.params.reference_video_id = referenceVideos[0]?.id;
+        generatePayload.params.mode = klingMode;
+        generatePayload.params.keep_original_sound = keepOriginalSound;
+        generatePayload.params.generate_audio = false;
       }
 
       // Add file data if needed
@@ -459,6 +521,13 @@ export default function StudioPage() {
                   setDuration(wf.id === 'multimodal-video' ? -1 : 5);
                   setResolution('720p');
                   setAspectRatio(wf.id === 'multimodal-video' ? 'adaptive' : '16:9');
+                  if (wf.id === 'character-replace') {
+                    setPrompt('Replace the person in <<<video_1>>> with the person from <<<image_1>>>, preserving the original motion, framing, lighting, and scene.');
+                    setGenerateAudio(false);
+                    setReferenceImages([]);
+                    setReferenceVideos([]);
+                    setReferenceVideoDuration(null);
+                  }
                 }}
                 className={`btn ${isActive ? 'btn-primary' : 'btn-secondary'}`}
                 style={{ borderRadius: '12px', fontSize: '0.9rem', padding: '0.6rem 1.2rem' }}
@@ -587,6 +656,36 @@ export default function StudioPage() {
             </>
           )}
 
+          {isCharacterReplace && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.35rem' }}>1. Upload the replacement character</h3>
+                <p style={{ color: 'var(--foreground-muted)', fontSize: '0.82rem', margin: 0 }}>
+                  Use one clear JPG or PNG showing the person who should replace the character in the source video.
+                </p>
+              </div>
+              <label style={{ border: '2px dashed var(--panel-border)', borderRadius: '12px', padding: '1rem', cursor: 'pointer', background: referenceImages.length ? 'rgba(139, 92, 246, 0.08)' : 'rgba(255, 255, 255, 0.02)' }}>
+                <input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void handleCharacterImageUpload(event.target.files)} style={{ display: 'none' }} />
+                <strong style={{ display: 'block' }}>{referenceImages[0]?.name || 'Choose character image'}</strong>
+                <span style={{ color: 'var(--foreground-muted)', fontSize: '0.75rem' }}>Maximum 10 MB</span>
+              </label>
+
+              <div>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.35rem' }}>2. Upload the source video</h3>
+                <p style={{ color: 'var(--foreground-muted)', fontSize: '0.82rem', margin: 0 }}>
+                  The video must be 3–10 seconds long. Longer videos are rejected before generation and no credits are charged.
+                </p>
+              </div>
+              <label style={{ border: '2px dashed var(--panel-border)', borderRadius: '12px', padding: '1rem', cursor: 'pointer', background: referenceVideos.length ? 'rgba(139, 92, 246, 0.08)' : 'rgba(255, 255, 255, 0.02)' }}>
+                <input type="file" accept="video/mp4,video/quicktime,video/webm" onChange={(event) => void handleCharacterVideoUpload(event.target.files)} style={{ display: 'none' }} />
+                <strong style={{ display: 'block' }}>{referenceVideos[0]?.name || 'Choose 3–10 second video'}</strong>
+                <span style={{ color: 'var(--foreground-muted)', fontSize: '0.75rem' }}>
+                  {referenceVideoDuration ? `${referenceVideoDuration.toFixed(1)} seconds` : 'Maximum 200 MB'}
+                </span>
+              </label>
+            </div>
+          )}
+
           {isSeedance && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
@@ -662,10 +761,10 @@ export default function StudioPage() {
             </div>
           )}
 
-          {(workflow === 'text-to-video' || workflow === 'text-to-image' || isSeedance) && (
+          {(workflow === 'text-to-video' || workflow === 'text-to-image' || isSeedance || isCharacterReplace) && (
             <>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 600 }}>{isSeedance ? '2.' : '1.'} Describe your creative vision</h3>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 600 }}>{isSeedance ? '2.' : isCharacterReplace ? '3.' : '1.'} Describe your creative vision</h3>
                 <button
                   onClick={handleEnhancePrompt}
                   className="btn btn-secondary"
@@ -746,6 +845,7 @@ export default function StudioPage() {
                   (workflow === 'text-to-video' && !prompt) ||
                   (workflow === 'text-to-image' && !prompt) ||
                   (workflow === 'multimodal-video' && !prompt) ||
+                  (workflow === 'character-replace' && (!prompt || !referenceImages[0] || !referenceVideos[0])) ||
                   (workflow === 'image-to-video' && !imageStorageObjectId) ||
                   (workflow === 'lip-sync' && (!imageStorageObjectId || !audioStorageObjectId)) || uploadProgress !== null
                 }
@@ -753,6 +853,7 @@ export default function StudioPage() {
                   (workflow === 'text-to-video' && !prompt) ||
                   (workflow === 'text-to-image' && !prompt) ||
                   (workflow === 'multimodal-video' && !prompt) ||
+                  (workflow === 'character-replace' && (!prompt || !referenceImages[0] || !referenceVideos[0])) ||
                   (workflow === 'image-to-video' && !imageFile) ||
                   (workflow === 'lip-sync' && (!imageStorageObjectId || !audioStorageObjectId)) || uploadProgress !== null ? 0.5 : 1 }}
               >
@@ -898,6 +999,25 @@ export default function StudioPage() {
           </select>
         </div>
 
+        {isCharacterReplace && (
+          <>
+            <div>
+              <label className="form-label">Quality</label>
+              <select className="form-select" value={klingMode} onChange={(e) => setKlingMode(e.target.value)}>
+                <option value="standard">Standard (720p)</option>
+                <option value="pro">Pro (1080p)</option>
+              </select>
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', fontSize: '0.9rem' }}>
+              Keep original video sound
+              <input type="checkbox" checked={keepOriginalSound} onChange={(e) => setKeepOriginalSound(e.target.checked)} />
+            </label>
+            <p style={{ color: 'var(--foreground-muted)', fontSize: '0.75rem', margin: 0 }}>
+              Output length follows the source video. Native audio generation is disabled because Kling cannot combine it with a reference video.
+            </p>
+          </>
+        )}
+
         <div>
           <label className="form-label">Variations</label>
           <select className="form-select" value={variations} onChange={(e) => setVariations(Number(e.target.value))}>
@@ -913,7 +1033,7 @@ export default function StudioPage() {
         </div>
 
         {/* Duration Slider */}
-        {workflow !== 'text-to-image' && !isSeedance && (
+        {workflow !== 'text-to-image' && !isSeedance && !isCharacterReplace && (
           <div className="slider-container">
             <div className="slider-header">
               <span>Duration</span>
@@ -970,7 +1090,7 @@ export default function StudioPage() {
         )}
 
         {/* FPS Slider */}
-        {workflow !== 'text-to-image' && !isSeedance && (
+        {workflow !== 'text-to-image' && !isSeedance && !isCharacterReplace && (
           <div className="slider-container">
             <div className="slider-header">
               <span>Frame Rate</span>
@@ -981,7 +1101,7 @@ export default function StudioPage() {
         )}
 
         {/* Camera Moves */}
-        {workflow !== 'text-to-image' && !isSeedance && (
+        {workflow !== 'text-to-image' && !isSeedance && !isCharacterReplace && (
           <div>
             <label className="form-label">Camera Motion</label>
             <select className="form-select" value={cameraMove} onChange={(e) => setCameraMove(e.target.value)}>
