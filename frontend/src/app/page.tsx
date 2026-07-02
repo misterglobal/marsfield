@@ -34,6 +34,9 @@ export default function StudioPage() {
   const [cameraMove, setCameraMove] = useState('none');
   const [motionStrength, setMotionStrength] = useState(1);
   const [resolution, setResolution] = useState('720p');
+  const [imageResolution, setImageResolution] = useState('1K');
+  const [imageOutputFormat, setImageOutputFormat] = useState('jpg');
+  const [recraftStyle, setRecraftStyle] = useState('any');
   const [aspectRatio, setAspectRatio] = useState('16:9');
   const [generateAudio, setGenerateAudio] = useState(true);
   const [klingMode, setKlingMode] = useState('pro');
@@ -83,6 +86,7 @@ export default function StudioPage() {
       { id: 'kuaishou/kling-v2-1', name: 'Kling 2.1', speed: 'Balanced' },
     ],
     'image-to-video': [
+      { id: 'xai/grok-imagine-video-1.5', name: 'Grok Imagine Video 1.5', speed: 'Native Audio' },
       { id: 'bytedance/wan-2.5-fast', name: 'Wan 2.5 Fast', speed: 'Ultrafast' },
       { id: 'minimax/hailuo-live', name: 'Hailuo Live', speed: 'Cinematic' },
     ],
@@ -93,6 +97,9 @@ export default function StudioPage() {
     'text-to-image': [
       { id: 'black-forest-labs/flux-schnell', name: 'Flux Schnell', speed: 'Speed' },
       { id: 'stability-ai/stable-diffusion-3', name: 'Stable Diffusion 3', speed: 'Accurate' },
+      { id: 'google/nano-banana-2', name: 'Nano Banana 2', speed: 'Fast + Editing' },
+      { id: 'google/nano-banana-pro', name: 'Nano Banana Pro', speed: 'Premium Quality' },
+      { id: 'recraft-ai/recraft-v3', name: 'Recraft V3', speed: 'Design + Typography' },
     ],
     'multimodal-video': [
       { id: 'bytedance/seedance-2.0', name: 'Seedance 2.0', speed: 'Best Quality' },
@@ -106,6 +113,9 @@ export default function StudioPage() {
 
   const isSeedance = workflow === 'multimodal-video';
   const isCharacterReplace = workflow === 'character-replace';
+  const isNanoBanana = model === 'google/nano-banana-2' || model === 'google/nano-banana-pro';
+  const isRecraft = model === 'recraft-ai/recraft-v3';
+  const isGrokImagineVideo = model === 'xai/grok-imagine-video-1.5';
 
   useEffect(() => {
     if (!token) {
@@ -139,17 +149,25 @@ export default function StudioPage() {
   }, [token]);
 
   const getBaseCredits = () => {
+    if (model === 'google/nano-banana-pro') return imageResolution === '4K' ? 6 : 3;
+    if (model === 'google/nano-banana-2') return imageResolution === '4K' ? 2 : 1;
     if (workflow === 'text-to-image') return 1;
-    if (model === 'bytedance/seedance-2.0-mini') return 2;
-    if (model === 'bytedance/seedance-2.0-fast') return 3;
-    if (model === 'bytedance/seedance-2.0') return 4;
-    if (model === 'kwaivgi/kling-v3-omni-video') return 5;
-    if (workflow.includes('video') || workflow === 'lip-sync') return 3;
+    const effectiveDuration = duration === -1 ? 15 : duration;
+    if (model === 'kwaivgi/kling-v3-omni-video') {
+      return Math.ceil(referenceVideoDuration || effectiveDuration) * (klingMode === 'standard' ? 5 : 7);
+    }
+    if (model === 'xai/grok-imagine-video-1.5') return Math.ceil(effectiveDuration) * 2;
+    const durationBlocks = Math.max(1, Math.ceil(effectiveDuration / 5));
+    if (model === 'bytedance/seedance-2.0-mini') return 2 * durationBlocks;
+    if (model === 'bytedance/seedance-2.0-fast') return 3 * durationBlocks;
+    if (model === 'bytedance/seedance-2.0') return 4 * durationBlocks;
+    if (workflow.includes('video') || workflow === 'lip-sync') return 3 * durationBlocks;
     return 1;
   };
 
   const baseCredits = getBaseCredits();
-  const totalCredits = baseCredits + Math.max(0, variations - 1) * Math.ceil(baseCredits * 0.75);
+  const variationUnitCredits = model === 'google/nano-banana-pro' ? baseCredits : Math.ceil(baseCredits * 0.75);
+  const totalCredits = baseCredits + Math.max(0, variations - 1) * variationUnitCredits;
 
   const uploadReferenceFiles = async (
     files: FileList | null,
@@ -385,6 +403,10 @@ export default function StudioPage() {
         setGenerationError('Please upload an image.');
         return;
       }
+      if (isGrokImagineVideo && !prompt.trim()) {
+        setGenerationError('Please describe the motion or scene for Grok Imagine Video.');
+        return;
+      }
     } else if (workflow === 'lip-sync') {
       if (!imageStorageObjectId || !audioStorageObjectId) {
         setGenerationError('Please upload both image and audio files.');
@@ -431,6 +453,12 @@ export default function StudioPage() {
         },
       };
 
+      if (workflow === 'text-to-image') {
+        generatePayload.params.resolution = isNanoBanana ? imageResolution : undefined;
+        generatePayload.params.output_format = isNanoBanana ? imageOutputFormat : undefined;
+        generatePayload.params.style = isRecraft ? recraftStyle : undefined;
+      }
+
       if (isSeedance) {
         generatePayload.params.reference_image_ids = referenceImages.map((file) => file.id);
         generatePayload.params.reference_video_ids = referenceVideos.map((file) => file.id);
@@ -443,6 +471,7 @@ export default function StudioPage() {
         generatePayload.params.mode = klingMode;
         generatePayload.params.keep_original_sound = keepOriginalSound;
         generatePayload.params.generate_audio = false;
+        generatePayload.params.duration = referenceVideoDuration || undefined;
       }
 
       // Add file data if needed
@@ -503,13 +532,13 @@ export default function StudioPage() {
   }, [pollAbortSignal]);
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '2rem', height: '100%' }}>
+    <div className="studio-layout" style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '2rem', height: '100%' }}>
 
       {/* Studio Workbench (Left Column) */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '2.5rem' }}>
+      <div className="studio-workbench" style={{ display: 'flex', flexDirection: 'column', gap: '2.5rem' }}>
 
         {/* Workflow Tabs */}
-        <div style={{ display: 'flex', gap: '1rem', borderBottom: '1px solid var(--panel-border)', paddingBottom: '1rem', flexWrap: 'wrap' }}>
+        <div className="workflow-tabs" style={{ display: 'flex', gap: '1rem', borderBottom: '1px solid var(--panel-border)', paddingBottom: '1rem', flexWrap: 'wrap' }}>
           {workflows.map((wf) => {
             const isActive = workflow === wf.id;
             return (
@@ -520,7 +549,10 @@ export default function StudioPage() {
                   setModel(modelsForWorkflow[wf.id][0].id);
                   setDuration(wf.id === 'multimodal-video' ? -1 : 5);
                   setResolution('720p');
-                  setAspectRatio(wf.id === 'multimodal-video' ? 'adaptive' : '16:9');
+                  setImageResolution('1K');
+                  setImageOutputFormat('jpg');
+                  setRecraftStyle('any');
+                  setAspectRatio(wf.id === 'multimodal-video' ? 'adaptive' : wf.id === 'image-to-video' ? 'auto' : '16:9');
                   if (wf.id === 'character-replace') {
                     setPrompt('Replace the person in <<<video_1>>> with the person from <<<image_1>>>, preserving the original motion, framing, lighting, and scene.');
                     setGenerateAudio(false);
@@ -542,7 +574,7 @@ export default function StudioPage() {
         <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
           {workflow === 'image-to-video' && (
             <>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div className="prompt-heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h3 style={{ fontSize: '1.1rem', fontWeight: 600 }}>1. Upload reference image</h3>
               </div>
               <div
@@ -694,7 +726,7 @@ export default function StudioPage() {
                   Optional. Use [Image1], [Video1], and [Audio1] in your prompt to reference uploaded files.
                 </p>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.75rem' }}>
+              <div className="reference-upload-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.75rem' }}>
                 {([
                   { kind: 'image', label: 'Images', accept: 'image/*', maximum: 9, files: referenceImages },
                   { kind: 'video', label: 'Videos', accept: 'video/*', maximum: 3, files: referenceVideos },
@@ -730,7 +762,7 @@ export default function StudioPage() {
                   </label>
                 ))}
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.75rem' }}>
+              <div className="reference-frame-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.75rem' }}>
                 {([
                   { position: 'first', label: 'First frame', file: firstFrame },
                   { position: 'last', label: 'Last frame', file: lastFrame },
@@ -761,10 +793,10 @@ export default function StudioPage() {
             </div>
           )}
 
-          {(workflow === 'text-to-video' || workflow === 'text-to-image' || isSeedance || isCharacterReplace) && (
+          {(workflow === 'text-to-video' || workflow === 'text-to-image' || isSeedance || isCharacterReplace || isGrokImagineVideo) && (
             <>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 600 }}>{isSeedance ? '2.' : isCharacterReplace ? '3.' : '1.'} Describe your creative vision</h3>
+              <div className="prompt-heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 600 }}>{isSeedance || isGrokImagineVideo ? '2.' : isCharacterReplace ? '3.' : '1.'} Describe your creative vision</h3>
                 <button
                   onClick={handleEnhancePrompt}
                   className="btn btn-secondary"
@@ -824,7 +856,7 @@ export default function StudioPage() {
           )}
 
           {!isGenerating ? (
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div className="generate-ready-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: '1.1rem' }}>
                   {generationStatus === 'succeeded' ? '✅ Generation Complete!' : 'Ready to Generate'}
@@ -844,6 +876,7 @@ export default function StudioPage() {
                   !token ||
                   (workflow === 'text-to-video' && !prompt) ||
                   (workflow === 'text-to-image' && !prompt) ||
+                  (isGrokImagineVideo && !prompt) ||
                   (workflow === 'multimodal-video' && !prompt) ||
                   (workflow === 'character-replace' && (!prompt || !referenceImages[0] || !referenceVideos[0])) ||
                   (workflow === 'image-to-video' && !imageStorageObjectId) ||
@@ -852,6 +885,7 @@ export default function StudioPage() {
                 style={{ padding: '1rem 2.5rem', fontSize: '1.05rem', opacity: !token || 
                   (workflow === 'text-to-video' && !prompt) ||
                   (workflow === 'text-to-image' && !prompt) ||
+                  (isGrokImagineVideo && !prompt) ||
                   (workflow === 'multimodal-video' && !prompt) ||
                   (workflow === 'character-replace' && (!prompt || !referenceImages[0] || !referenceVideos[0])) ||
                   (workflow === 'image-to-video' && !imageFile) ||
@@ -900,7 +934,7 @@ export default function StudioPage() {
                 />
               )}
             </div>
-            <div style={{ display: 'flex', gap: '1rem' }}>
+            <div className="result-actions" style={{ display: 'flex', gap: '1rem' }}>
               <a
                 href={lastGeneratedAsset.url}
                 download
@@ -951,7 +985,7 @@ export default function StudioPage() {
       </div>
 
       {/* Settings Panel (Right Column) */}
-      <aside className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem', height: 'fit-content' }}>
+      <aside className="glass-card studio-settings" style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem', height: 'fit-content' }}>
         <h3 style={{ fontSize: '1.1rem', fontWeight: 700, borderBottom: '1px solid var(--panel-border)', paddingBottom: '0.75rem' }}>
           🔧 Settings
         </h3>
@@ -986,6 +1020,14 @@ export default function StudioPage() {
             onChange={(e) => {
               const nextModel = e.target.value;
               setModel(nextModel);
+              if (nextModel === 'xai/grok-imagine-video-1.5') {
+                setResolution('720p');
+                setAspectRatio('auto');
+              } else if (workflow === 'image-to-video') {
+                setAspectRatio('16:9');
+              }
+              if (nextModel === 'google/nano-banana-pro') setImageResolution('2K');
+              if (nextModel === 'google/nano-banana-2') setImageResolution('1K');
               if (nextModel === 'bytedance/seedance-2.0-mini' && resolution === '1080p') {
                 setResolution('720p');
               }
@@ -1018,6 +1060,71 @@ export default function StudioPage() {
           </>
         )}
 
+        {workflow === 'text-to-image' && (isNanoBanana || isRecraft) && (
+          <>
+            <div>
+              <label className="form-label">Aspect Ratio</label>
+              <select className="form-select" value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)}>
+                {(isRecraft
+                  ? ['1:1', '4:3', '3:4', '3:2', '2:3', '16:9', '9:16', '4:5', '5:4']
+                  : ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9']
+                ).map((ratio) => <option key={ratio} value={ratio}>{ratio}</option>)}
+              </select>
+            </div>
+            {isNanoBanana && (
+              <>
+                <div>
+                  <label className="form-label">Resolution</label>
+                  <select className="form-select" value={imageResolution} onChange={(e) => setImageResolution(e.target.value)}>
+                    {['1K', '2K', '4K'].map((value) => <option key={value} value={value}>{value}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">Output Format</label>
+                  <select className="form-select" value={imageOutputFormat} onChange={(e) => setImageOutputFormat(e.target.value)}>
+                    <option value="jpg">JPG</option>
+                    <option value="png">PNG</option>
+                  </select>
+                </div>
+              </>
+            )}
+            {isRecraft && (
+              <div>
+                <label className="form-label">Design Style</label>
+                <select className="form-select" value={recraftStyle} onChange={(e) => setRecraftStyle(e.target.value)}>
+                  <option value="any">Automatic</option>
+                  <option value="realistic_image">Realistic Image</option>
+                  <option value="digital_illustration">Digital Illustration</option>
+                  <option value="vector_illustration">Vector Illustration</option>
+                </select>
+              </div>
+            )}
+          </>
+        )}
+
+        {isGrokImagineVideo && (
+          <>
+            <div>
+              <label className="form-label">Resolution</label>
+              <select className="form-select" value={resolution} onChange={(e) => setResolution(e.target.value)}>
+                <option value="480p">480p</option>
+                <option value="720p">720p</option>
+              </select>
+            </div>
+            <div>
+              <label className="form-label">Aspect Ratio</label>
+              <select className="form-select" value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)}>
+                {['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'].map((ratio) => (
+                  <option key={ratio} value={ratio}>{ratio === 'auto' ? 'Auto (match image)' : ratio}</option>
+                ))}
+              </select>
+            </div>
+            <p style={{ color: 'var(--foreground-muted)', fontSize: '0.75rem', margin: 0 }}>
+              Grok generates synchronized audio automatically. Billing is 2 credits per output second.
+            </p>
+          </>
+        )}
+
         <div>
           <label className="form-label">Variations</label>
           <select className="form-select" value={variations} onChange={(e) => setVariations(Number(e.target.value))}>
@@ -1039,7 +1146,7 @@ export default function StudioPage() {
               <span>Duration</span>
               <strong>{duration}s</strong>
             </div>
-            <input type="range" min={5} max={15} step={5} className="form-range" value={duration} onChange={(e) => setDuration(Number(e.target.value))} />
+            <input type="range" min={isGrokImagineVideo ? 1 : 5} max={15} step={isGrokImagineVideo ? 1 : 5} className="form-range" value={duration} onChange={(e) => setDuration(Number(e.target.value))} />
           </div>
         )}
 

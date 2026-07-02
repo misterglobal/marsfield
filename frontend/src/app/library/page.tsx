@@ -100,7 +100,7 @@ export default function LibraryPage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
 
       {/* Search & Filter Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
+      <div className="library-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', gap: '0.75rem' }}>
           {['all', 'video', 'image'].map((type) => (
             <button
@@ -117,7 +117,7 @@ export default function LibraryPage() {
           </button>
         </div>
 
-        <div style={{ position: 'relative', width: '300px' }}>
+        <div className="library-search" style={{ position: 'relative', width: '300px' }}>
           <input
             type="text"
             placeholder="Search prompts..."

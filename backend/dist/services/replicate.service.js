@@ -45,7 +45,7 @@ class ReplicateService {
         return {
             id: mockId,
             status: 'succeeded',
-            outputUrl: model.includes('flux') || model.includes('diffusion')
+            outputUrl: model.includes('flux') || model.includes('diffusion') || model.includes('banana') || model.includes('recraft')
                 ? 'https://picsum.photos/800/600' // Mock Image
                 : 'https://www.w3schools.com/html/mov_bbb.mp4', // Mock Video
         };

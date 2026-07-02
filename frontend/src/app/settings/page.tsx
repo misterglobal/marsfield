@@ -141,8 +141,8 @@ export default function SettingsPage() {
   };
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: '2rem' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+    <div className="settings-layout" style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: '2rem' }}>
+      <div className="settings-main" style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
         {error && (
           <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', padding: '0.75rem', borderRadius: '8px', fontSize: '0.85rem', color: '#ef4444' }}>
             {error}
@@ -167,7 +167,7 @@ export default function SettingsPage() {
             Create access tokens for scripts and automation. Full keys are only shown once.
           </p>
 
-          <form onSubmit={handleGenerateKey} style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
+          <form className="api-key-form" onSubmit={handleGenerateKey} style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
             <input
               type="text"
               placeholder="e.g. Production Script Token"
@@ -185,6 +185,7 @@ export default function SettingsPage() {
             {apiKeys.map((key) => (
               <div
                 key={key.id}
+                className="api-key-row"
                 style={{
                   display: 'flex',
                   justifyContent: 'space-between',
@@ -230,7 +231,7 @@ export default function SettingsPage() {
           <p style={{ color: 'var(--foreground-muted)', fontSize: '0.85rem', margin: 0 }}>
             Plans are handled through Freemius. Marsfield grants monthly credits and storage after the signed Freemius webhook confirms the purchase.
           </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.85rem' }}>
+          <div className="plan-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.85rem' }}>
             {plans.map((plan) => {
               const isCurrent = usage?.plan?.toLowerCase() === plan.tier;
               const isFree = plan.tier === 'free';
@@ -263,7 +264,7 @@ export default function SettingsPage() {
         <section className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <h3 style={{ fontSize: '1.15rem', fontWeight: 700 }}>Usage History</h3>
           {usage?.recent_usage.length ? usage.recent_usage.map((event) => (
-            <div key={event.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', padding: '0.85rem 0', borderBottom: '1px solid var(--panel-border)' }}>
+            <div key={event.id} className="usage-row" style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', padding: '0.85rem 0', borderBottom: '1px solid var(--panel-border)' }}>
               <div>
                 <strong style={{ textTransform: 'capitalize' }}>{event.event_type}</strong>
                 <p style={{ margin: '0.2rem 0 0', color: 'var(--foreground-muted)', fontSize: '0.82rem' }}>
@@ -284,7 +285,7 @@ export default function SettingsPage() {
         </section>
       </div>
 
-      <aside className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', height: 'fit-content' }}>
+      <aside className="glass-card account-summary" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', height: 'fit-content' }}>
         <h3 style={{ fontSize: '1.1rem', fontWeight: 700, borderBottom: '1px solid var(--panel-border)', paddingBottom: '0.75rem' }}>
           💎 Account Plan
         </h3>

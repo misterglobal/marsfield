@@ -114,6 +114,10 @@ export default function RootLayout({
   return (
     <AuthContext.Provider value={{ user, token, login: handleLogin, register: handleRegister, logout: handleLogout }}>
       <html lang="en">
+        <head>
+          <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+          <meta name="theme-color" content="#030303" />
+        </head>
         <body>
           {/* Persistent Sidebar */}
           <aside className="sidebar">
@@ -133,6 +137,10 @@ export default function RootLayout({
               })}
             </ul>
             <div className="sidebar-footer">
+              <div style={{ display: "flex", gap: "0.8rem", flexWrap: "wrap", fontSize: "0.75rem" }}>
+                <Link href="/privacy" style={{ color: "var(--foreground-muted)" }}>Privacy</Link>
+                <Link href="/terms" style={{ color: "var(--foreground-muted)" }}>Terms</Link>
+              </div>
               {user ? (
                 <>
                   <div style={{ fontSize: "0.85rem", color: "var(--foreground-muted)" }}>
@@ -176,18 +184,21 @@ export default function RootLayout({
                   {pathname === "/projects" && "Projects & Storyboards"}
                   {pathname === "/library" && "Asset Vault & Library"}
                   {pathname === "/settings" && "Developer & Studio Settings"}
+                  {pathname === "/privacy" && "Privacy Policy"}
+                  {pathname === "/terms" && "Terms of Service"}
                 </h2>
               </div>
-              <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
+              <div className="top-bar-account" style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
                 {user ? (
                   <>
-                    <span style={{ fontSize: "0.9rem", fontWeight: 500 }}>{user.name || user.email}</span>
+                    <span className="top-bar-user-label" style={{ fontSize: "0.9rem", fontWeight: 500 }}>{user.name || user.email}</span>
                     <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: "var(--primary)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold", fontSize: "0.85rem" }}>
                       {(user.name || user.email).charAt(0).toUpperCase()}
                     </div>
+                    <button className="mobile-only mobile-account-button" onClick={handleLogout}>Logout</button>
                   </>
                 ) : (
-                  <span style={{ fontSize: "0.85rem", color: "var(--foreground-muted)" }}>Not signed in</span>
+                  <button className="mobile-sign-in" onClick={() => setShowLogin(true)}>Sign in</button>
                 )}
               </div>
             </header>
@@ -196,6 +207,18 @@ export default function RootLayout({
               {children}
             </main>
           </div>
+
+          <nav className="mobile-nav" aria-label="Primary navigation">
+            {menuItems.map((item) => {
+              const isActive = pathname === item.href;
+              return (
+                <Link key={item.name} href={item.href} className={isActive ? "active" : ""}>
+                  <span aria-hidden="true">{item.icon}</span>
+                  <small>{item.name.replace("Video ", "").replace("Asset ", "").replace(" & API", "")}</small>
+                </Link>
+              );
+            })}
+          </nav>
 
           {/* Login Modal Overlay */}
           {showLogin && (
@@ -213,7 +236,7 @@ export default function RootLayout({
               onClick={() => setShowLogin(false)}
             >
               <div
-                className="glass-card"
+                className="glass-card auth-modal"
                 style={{
                   width: "380px",
                   display: "flex",
@@ -229,7 +252,7 @@ export default function RootLayout({
                 <p style={{ color: "var(--foreground-muted)", fontSize: "0.85rem", margin: 0 }}>
                   {authMode === 'login'
                     ? 'Enter your credentials to access the studio.'
-                    : 'Start with 10 generation credits and your own asset library.'}
+                    : 'Start with 15 generation credits and your own asset library.'}
                 </p>
 
                 {loginError && (
@@ -273,6 +296,11 @@ export default function RootLayout({
                     </p>
                   )}
                 </div>
+                {authMode === 'register' && (
+                  <p style={{ color: "var(--foreground-muted)", fontSize: "0.72rem", margin: 0, lineHeight: 1.5 }}>
+                    By creating an account, you agree to the <Link href="/terms" onClick={() => setShowLogin(false)}>Terms of Service</Link> and acknowledge the <Link href="/privacy" onClick={() => setShowLogin(false)}>Privacy Policy</Link>.
+                  </p>
+                )}
                 <button
                   className="btn btn-primary"
                   style={{ width: "100%", marginTop: "0.5rem" }}

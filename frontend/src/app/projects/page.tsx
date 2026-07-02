@@ -122,8 +122,8 @@ export default function ProjectsPage() {
   }
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '360px 1fr', gap: '2rem' }}>
-      <aside style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+    <div className="projects-layout" style={{ display: 'grid', gridTemplateColumns: '360px 1fr', gap: '2rem' }}>
+      <aside className="projects-sidebar" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
         <form className="glass-card" onSubmit={createProject} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
           <h3 style={{ margin: 0, fontSize: '1rem' }}>New Project</h3>
           <input className="form-input" placeholder="Project name" value={name} onChange={(event) => setName(event.target.value)} />
@@ -181,7 +181,7 @@ export default function ProjectsPage() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               {selectedProject.scenes.map((scene) => (
-                <article key={scene.id} className="glass-card" style={{ display: 'grid', gridTemplateColumns: '56px 1fr', gap: '1rem' }}>
+                <article key={scene.id} className="glass-card storyboard-scene" style={{ display: 'grid', gridTemplateColumns: '56px 1fr', gap: '1rem' }}>
                   <div style={{ width: 44, height: 44, borderRadius: '14px', background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>
                     {scene.index + 1}
                   </div>

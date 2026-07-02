@@ -4,3 +4,6 @@ node_modules
 *.txt
 backend/.env
 .env
+DEPLOYMENT.md
+NEXT MOVE.md
+PRD.md

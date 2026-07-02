@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.middleware';
-import { ReplicateService } from '../services/replicate.service';
+import { PredictionInput, ReplicateService } from '../services/replicate.service';
 import { queueService } from '../services/queue.service';
 import { quoteGeneration } from '../services/billing.service';
 import { randomUUID } from 'crypto';
@@ -15,6 +15,19 @@ const SEEDANCE_MODELS = new Set([
   'bytedance/seedance-2.0',
   'bytedance/seedance-2.0-fast',
   'bytedance/seedance-2.0-mini',
+]);
+
+const NANO_BANANA_MODELS = new Set([
+  'google/nano-banana-2',
+  'google/nano-banana-pro',
+]);
+
+const IMAGE_MODELS = new Set([
+  'black-forest-labs/flux-schnell',
+  'stability-ai/stable-diffusion-3',
+  'google/nano-banana-2',
+  'google/nano-banana-pro',
+  'recraft-ai/recraft-v3',
 ]);
 
 function decodeFileInput(value: unknown, maximumBytes: number): string | Blob {
@@ -132,24 +145,14 @@ router.post('/generate', authMiddleware, async (req: AuthenticatedRequest, res: 
        return;
     }
 
-    const billingQuote = quoteGeneration({ workflow, model, params });
-    const remainingCredits = user.creditsLimit - user.creditsUsed;
-    if (billingQuote.totalCredits > remainingCredits) {
-       res.status(403).json({
-         error: 'Generation quota exceeded. Please upgrade plan.',
-         credits_required: billingQuote.totalCredits,
-         credits_remaining: Math.max(0, remainingCredits),
-       });
-       return;
-    }
-
     const isSeedance = SEEDANCE_MODELS.has(model);
     if (workflow === 'multimodal-video' && !isSeedance) {
       res.status(400).json({ error: 'The multimodal-video workflow requires a Seedance 2.0 model' });
       return;
     }
 
-    let predictionInput;
+    let predictionInput: PredictionInput;
+    const billingParams: Record<string, unknown> = { ...(params || {}) };
     try {
       if (isSeedance) {
         const duration = params?.duration ?? 5;
@@ -223,6 +226,8 @@ router.post('/generate', authMiddleware, async (req: AuthenticatedRequest, res: 
         }
         const mode = params?.mode || 'pro';
         if (!['standard', 'pro'].includes(mode)) throw new Error('Kling mode must be standard or pro');
+        billingParams.duration = referenceDuration;
+        billingParams.mode = mode;
 
         predictionInput = {
           prompt: prompt || 'Replace the person in <<<video_1>>> with the person from <<<image_1>>>, preserving the original motion, framing, lighting, and scene.',
@@ -249,23 +254,106 @@ router.post('/generate', authMiddleware, async (req: AuthenticatedRequest, res: 
           seed: Number.isInteger(params?.seed) ? params.seed : undefined,
           fast_mode: model === 'bytedance/omni-human-1.5' ? params?.fast_mode === true : undefined,
         };
+      } else if (workflow === 'text-to-image') {
+        if (!IMAGE_MODELS.has(model)) throw new Error('Unsupported image generation model');
+        if (typeof prompt !== 'string' || !prompt.trim()) throw new Error('Image generation requires a prompt');
+
+        if (NANO_BANANA_MODELS.has(model)) {
+          const validResolutions = ['1K', '2K', '4K'];
+          const validAspectRatios = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
+          const validFormats = ['jpg', 'png'];
+          const imageResolution = params?.resolution || (model === 'google/nano-banana-pro' ? '2K' : '1K');
+          const imageAspectRatio = params?.aspect_ratio || '1:1';
+          const outputFormat = params?.output_format || 'jpg';
+
+          if (!validResolutions.includes(imageResolution)) throw new Error('Invalid Nano Banana resolution');
+          if (!validAspectRatios.includes(imageAspectRatio)) throw new Error('Invalid Nano Banana aspect ratio');
+          if (!validFormats.includes(outputFormat)) throw new Error('Invalid Nano Banana output format');
+
+          predictionInput = {
+            prompt: prompt.trim(),
+            resolution: imageResolution,
+            aspect_ratio: imageAspectRatio,
+            output_format: outputFormat,
+            ...(model === 'google/nano-banana-pro'
+              ? { safety_filter_level: 'block_only_high', allow_fallback_model: true }
+              : {}),
+          };
+        } else if (model === 'recraft-ai/recraft-v3') {
+          const validAspectRatios = ['1:1', '4:3', '3:4', '3:2', '2:3', '16:9', '9:16', '1:2', '2:1', '7:5', '5:7', '4:5', '5:4', '3:5', '5:3'];
+          const validStyles = ['any', 'realistic_image', 'digital_illustration', 'vector_illustration'];
+          const imageAspectRatio = params?.aspect_ratio || '1:1';
+          const style = params?.style || 'any';
+
+          if (!validAspectRatios.includes(imageAspectRatio)) throw new Error('Invalid Recraft aspect ratio');
+          if (!validStyles.includes(style)) throw new Error('Invalid Recraft style');
+
+          predictionInput = {
+            prompt: prompt.trim(),
+            aspect_ratio: imageAspectRatio,
+            style,
+          };
+        } else {
+          predictionInput = {
+            prompt: prompt.trim(),
+            aspect_ratio: params?.aspect_ratio,
+          };
+        }
       } else {
         const image = workflow === 'image-to-video'
           ? await resolveOwnedStorageObject(user.id, req.body.image_storage_object_id, 'image/', 'Input image')
           : undefined;
         if (workflow === 'image-to-video' && !image) throw new Error('Image-to-video requires a stored image');
-        predictionInput = {
-          prompt,
-          aspect_ratio: params?.aspect_ratio,
-          duration: params?.duration,
-          fps: params?.fps,
-          camera_move: params?.camera_move,
-          motion_strength: params?.motion_strength,
-          image,
-        };
+        if (model === 'xai/grok-imagine-video-1.5') {
+          const grokDuration = params?.duration ?? 5;
+          const grokResolution = params?.resolution || '720p';
+          const grokAspectRatio = params?.aspect_ratio || 'auto';
+          if (typeof prompt !== 'string' || !prompt.trim()) throw new Error('Grok Imagine Video requires a motion prompt');
+          if (!Number.isInteger(grokDuration) || grokDuration < 1 || grokDuration > 15) {
+            throw new Error('Grok Imagine Video duration must be an integer from 1 to 15 seconds');
+          }
+          if (!['480p', '720p'].includes(grokResolution)) throw new Error('Grok Imagine Video resolution must be 480p or 720p');
+          if (!['auto', '16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'].includes(grokAspectRatio)) {
+            throw new Error('Invalid Grok Imagine Video aspect ratio');
+          }
+          predictionInput = {
+            prompt: prompt.trim(),
+            image,
+            duration: grokDuration,
+            resolution: grokResolution,
+            aspect_ratio: grokAspectRatio,
+          };
+        } else {
+          predictionInput = {
+            prompt,
+            aspect_ratio: params?.aspect_ratio,
+            duration: params?.duration,
+            fps: params?.fps,
+            camera_move: params?.camera_move,
+            motion_strength: params?.motion_strength,
+            image,
+          };
+        }
       }
     } catch (error) {
       res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid generation parameters' });
+      return;
+    }
+
+    let billingQuote;
+    try {
+      billingQuote = quoteGeneration({ workflow, model, params: billingParams });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid billing parameters' });
+      return;
+    }
+    const remainingCredits = user.creditsLimit - user.creditsUsed;
+    if (billingQuote.totalCredits > remainingCredits) {
+      res.status(403).json({
+        error: 'Generation quota exceeded. Please upgrade plan.',
+        credits_required: billingQuote.totalCredits,
+        credits_remaining: Math.max(0, remainingCredits),
+      });
       return;
     }
 
@@ -343,7 +431,9 @@ router.post('/generate', authMiddleware, async (req: AuthenticatedRequest, res: 
           variationGroupId,
           variationIndex,
           variationCount: billingQuote.variationCount,
-          creditCost: variationIndex === 0 ? billingQuote.baseCredits : Math.ceil(billingQuote.baseCredits * 0.75),
+          creditCost: variationIndex === 0 || model === 'google/nano-banana-pro'
+            ? billingQuote.baseCredits
+            : Math.ceil(billingQuote.baseCredits * 0.75),
           status: repPrediction.status,
           replicatePredictionId: repPrediction.id,
           outputUrl: repPrediction.outputUrl || null,

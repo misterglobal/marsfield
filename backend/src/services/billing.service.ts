@@ -28,19 +28,44 @@ function parseVariationCount(params?: Record<string, unknown>): number {
 }
 
 function getBaseCredits(input: GenerationBillingInput): number {
+  if (input.model === 'google/nano-banana-pro') {
+    return input.params?.resolution === '4K' ? 6 : 3;
+  }
+  if (input.model === 'google/nano-banana-2') {
+    return input.params?.resolution === '4K' ? 2 : 1;
+  }
   if (input.workflow === 'text-to-image') return 1;
-  if (input.model === 'bytedance/seedance-2.0-mini') return 2;
-  if (input.model === 'bytedance/seedance-2.0-fast') return 3;
-  if (input.model === 'bytedance/seedance-2.0') return 4;
-  if (input.model === 'kwaivgi/kling-v3-omni-video') return 5;
-  if (input.workflow.includes('video') || input.workflow === 'lip-sync') return 3;
+
+  const requestedDuration = Number(input.params?.duration ?? 5);
+  const effectiveDuration = requestedDuration === -1 ? 15 : requestedDuration;
+  if (!Number.isFinite(effectiveDuration) || effectiveDuration <= 0) {
+    throw new Error('Duration must be a positive number or -1 for automatic duration');
+  }
+
+  if (input.model === 'kwaivgi/kling-v3-omni-video') {
+    const creditsPerSecond = input.params?.mode === 'standard' ? 5 : 7;
+    return Math.ceil(effectiveDuration) * creditsPerSecond;
+  }
+
+  if (input.model === 'xai/grok-imagine-video-1.5') {
+    return Math.ceil(effectiveDuration) * 2;
+  }
+
+  const durationBlocks = Math.max(1, Math.ceil(effectiveDuration / 5));
+  if (input.model === 'bytedance/seedance-2.0-mini') return 2 * durationBlocks;
+  if (input.model === 'bytedance/seedance-2.0-fast') return 3 * durationBlocks;
+  if (input.model === 'bytedance/seedance-2.0') return 4 * durationBlocks;
+  if (input.workflow.includes('video') || input.workflow === 'lip-sync') return 3 * durationBlocks;
   return 1;
 }
 
 export function quoteGeneration(input: GenerationBillingInput): GenerationBillingQuote {
   const baseCredits = getBaseCredits(input);
   const variationCount = parseVariationCount(input.params);
-  const variationCredits = Math.max(0, variationCount - 1) * Math.ceil(baseCredits * 0.75);
+  const additionalOutputCredits = input.model === 'google/nano-banana-pro'
+    ? baseCredits
+    : Math.ceil(baseCredits * 0.75);
+  const variationCredits = Math.max(0, variationCount - 1) * additionalOutputCredits;
 
   return {
     baseCredits,
