@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.storageService = exports.StorageService = void 0;
 const client_s3_1 = require("@aws-sdk/client-s3");
+const s3_request_presigner_1 = require("@aws-sdk/s3-request-presigner");
 const crypto_1 = require("crypto");
 const path_1 = __importDefault(require("path"));
 function envValue(name) {
@@ -173,6 +174,58 @@ class StorageService {
             byteSize: input.buffer.byteLength,
             checksum,
         };
+    }
+    async createPresignedUpload(input) {
+        if (!this.config || !this.client)
+            return null;
+        const now = new Date();
+        const extension = extensionForAsset(input.originalName, input.mimeType, input.assetType);
+        const key = [
+            'users', input.userId, 'uploads', String(now.getUTCFullYear()),
+            String(now.getUTCMonth() + 1).padStart(2, '0'), `${input.objectId}.${extension}`,
+        ].join('/');
+        const expiresIn = 15 * 60;
+        const uploadUrl = await (0, s3_request_presigner_1.getSignedUrl)(this.client, new client_s3_1.PutObjectCommand({
+            Bucket: this.config.bucket,
+            Key: key,
+            ContentType: input.mimeType,
+        }), { expiresIn });
+        const publicBaseUrl = this.config.publicBaseUrl?.replace(/\/+$/, '');
+        const url = publicBaseUrl
+            ? `${publicBaseUrl}/${key}`
+            : `${this.config.endpoint}/${this.config.bucket}/${key}`;
+        return {
+            provider: 'cloudflare_r2',
+            bucket: this.config.bucket,
+            key,
+            url,
+            uploadUrl,
+            expiresIn,
+        };
+    }
+    async inspectObject(key) {
+        if (!this.config || !this.client)
+            return null;
+        const object = await this.client.send(new client_s3_1.HeadObjectCommand({
+            Bucket: this.config.bucket,
+            Key: key,
+        }));
+        return {
+            byteSize: Number(object.ContentLength || 0),
+            mimeType: object.ContentType || null,
+        };
+    }
+    async deleteObject(key) {
+        if (!this.config || !this.client)
+            return false;
+        await this.client.send(new client_s3_1.DeleteObjectCommand({
+            Bucket: this.config.bucket,
+            Key: key,
+        }));
+        return true;
+    }
+    thumbnailKey(userId, assetId) {
+        return ['users', userId, 'thumbnails', `${assetId}.webp`].join('/');
     }
     formatStorageError(error) {
         if (!error || typeof error !== 'object') {

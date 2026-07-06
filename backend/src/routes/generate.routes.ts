@@ -1,12 +1,13 @@
 import { Router, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.middleware';
+import { authMiddleware, AuthenticatedRequest, requireScope } from '../middleware/auth.middleware';
 import { PredictionInput, ReplicateService } from '../services/replicate.service';
 import { queueService } from '../services/queue.service';
 import { quoteGeneration } from '../services/billing.service';
 import { randomUUID } from 'crypto';
 import { createAssetForPrediction } from '../services/asset.service';
 import { getRemoteVideoDuration } from '../services/media-probe.service';
+import { rateLimit } from '../middleware/rate-limit.middleware';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -110,7 +111,7 @@ async function resolveOwnedStorageObject(
 }
 
 // POST /api/v1/generate
-router.post('/generate', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/generate', authMiddleware, requireScope('generation:write'), rateLimit('generation'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user;
     if (!user) {
@@ -270,11 +271,16 @@ router.post('/generate', authMiddleware, async (req: AuthenticatedRequest, res: 
           if (!validAspectRatios.includes(imageAspectRatio)) throw new Error('Invalid Nano Banana aspect ratio');
           if (!validFormats.includes(outputFormat)) throw new Error('Invalid Nano Banana output format');
 
+          const imageInput = params?.reference_image_ids
+            ? await resolveOwnedStorageObjects(user.id, params.reference_image_ids, 14, 'image/', 'Nano Banana reference images')
+            : undefined;
+
           predictionInput = {
             prompt: prompt.trim(),
             resolution: imageResolution,
             aspect_ratio: imageAspectRatio,
             output_format: outputFormat,
+            image_input: imageInput || [],
             ...(model === 'google/nano-banana-pro'
               ? { safety_filter_level: 'block_only_high', allow_fallback_model: true }
               : {}),
@@ -500,7 +506,7 @@ router.post('/generate', authMiddleware, async (req: AuthenticatedRequest, res: 
 });
 
 // GET /api/v1/predictions/:id
-router.get('/predictions/:id', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/predictions/:id', authMiddleware, requireScope('predictions:read'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user;
     if (!user) {

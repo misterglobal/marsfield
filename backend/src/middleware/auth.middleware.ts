@@ -12,6 +12,8 @@ if (!JWT_SECRET) {
 
 export interface AuthenticatedRequest extends Request {
   authType?: 'jwt' | 'api_key';
+  credentialId?: string;
+  apiKeyScopes?: string[];
   user?: {
     id: string;
     email: string;
@@ -41,6 +43,9 @@ export async function authMiddleware(
         where: { key: hashedKey },
         select: {
           id: true,
+          scopes: true,
+          expiresAt: true,
+          revokedAt: true,
           user: {
             select: {
               id: true,
@@ -53,13 +58,15 @@ export async function authMiddleware(
         },
       });
 
-      if (!apiKey?.user) {
+      if (!apiKey?.user || apiKey.revokedAt || (apiKey.expiresAt && apiKey.expiresAt <= new Date())) {
         res.status(401).json({ error: 'Invalid or expired authorization token' });
         return;
       }
 
       req.user = apiKey.user;
       req.authType = 'api_key';
+      req.credentialId = apiKey.id;
+      req.apiKeyScopes = apiKey.scopes;
       void prisma.apiKey.update({
         where: { id: apiKey.id },
         data: { lastUsedAt: new Date() },
@@ -102,8 +109,23 @@ export async function authMiddleware(
 
     req.user = user;
     req.authType = 'jwt';
+    req.credentialId = user.id;
     next();
   } catch (error) {
     res.status(401).json({ error: 'Invalid or expired authorization token' });
   }
+}
+
+export function requireScope(scope: string) {
+  return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+    if (req.authType !== 'api_key') {
+      next();
+      return;
+    }
+    if (!req.apiKeyScopes?.includes(scope)) {
+      res.status(403).json({ error: `API key requires the ${scope} scope` });
+      return;
+    }
+    next();
+  };
 }

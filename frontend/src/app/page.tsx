@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { api } from '@/lib/api';
 import { useAuth } from './layout';
 
@@ -22,6 +22,16 @@ interface VariationResult {
   url?: string;
   variationIndex: number;
   type: string;
+}
+
+interface LibraryAsset {
+  id: string;
+  url: string;
+  type: 'image' | 'video' | 'audio';
+  thumbnailUrl: string | null;
+  storageObjectId: string | null;
+  storageObject?: { mimeType?: string | null; byteSize?: number | null } | null;
+  prediction?: { prompt?: string | null; model?: string; workflow?: string } | null;
 }
 
 export default function StudioPage() {
@@ -69,6 +79,8 @@ export default function StudioPage() {
   const [referenceAudio, setReferenceAudio] = useState<ReferenceFile[]>([]);
   const [firstFrame, setFirstFrame] = useState<ReferenceFile | null>(null);
   const [lastFrame, setLastFrame] = useState<ReferenceFile | null>(null);
+  const [libraryAssets, setLibraryAssets] = useState<LibraryAsset[]>([]);
+  const [libraryLoading, setLibraryLoading] = useState(false);
 
   const workflows = [
     { id: 'text-to-video', name: 'Text-to-Video', icon: '📝' },
@@ -117,6 +129,22 @@ export default function StudioPage() {
   const isRecraft = model === 'recraft-ai/recraft-v3';
   const isGrokImagineVideo = model === 'xai/grok-imagine-video-1.5';
 
+  const loadLibraryAssets = useCallback(async () => {
+    if (!token) {
+      setLibraryAssets([]);
+      return;
+    }
+    setLibraryLoading(true);
+    try {
+      const assets = await api.getAssets();
+      setLibraryAssets(assets.filter((asset: LibraryAsset) => asset.storageObjectId));
+    } catch (error) {
+      console.error('Failed to load reusable assets:', error);
+    } finally {
+      setLibraryLoading(false);
+    }
+  }, [token]);
+
   useEffect(() => {
     if (!token) {
       setProjects([]);
@@ -127,7 +155,8 @@ export default function StudioPage() {
     void api.getProjects()
       .then((data) => setProjects(data.map((project: any) => ({ id: project.id, name: project.name }))))
       .catch((error) => console.error('Failed to load projects:', error));
-  }, [token]);
+    void loadLibraryAssets();
+  }, [token, loadLibraryAssets]);
 
   useEffect(() => {
     if (!token) return;
@@ -187,10 +216,12 @@ export default function StudioPage() {
 
     setUploadProgress(0);
     try {
-      return await Promise.all(selected.map(async (file) => {
+      const uploadedReferences = await Promise.all(selected.map(async (file) => {
         const uploaded = await api.uploadFile(file, 'seedance-reference', setUploadProgress);
         return { name: file.name, id: uploaded.id, url: uploaded.url, kind } as ReferenceFile;
       }));
+      void loadLibraryAssets();
+      return uploadedReferences;
     } finally {
       setUploadProgress(null);
     }
@@ -298,6 +329,7 @@ export default function StudioPage() {
       try {
         const uploaded = await api.uploadFile(file, 'generation-input', setUploadProgress);
         setImageStorageObjectId(uploaded.id);
+        void loadLibraryAssets();
       } catch (error) {
         setImageFile(null);
         setImageStorageObjectId('');
@@ -321,6 +353,7 @@ export default function StudioPage() {
       try {
         const uploaded = await api.uploadFile(file, 'lip-sync-audio', setUploadProgress);
         setAudioStorageObjectId(uploaded.id);
+        void loadLibraryAssets();
       } catch (error) {
         setAudioFile(null);
         setAudioStorageObjectId('');
@@ -329,6 +362,78 @@ export default function StudioPage() {
         setUploadProgress(null);
       }
     }
+  };
+
+  const supportedLibraryTypes: Array<'image' | 'video' | 'audio'> =
+    workflow === 'image-to-video' || (workflow === 'text-to-image' && isNanoBanana)
+      ? ['image']
+      : workflow === 'lip-sync'
+        ? ['image', 'audio']
+        : isCharacterReplace
+          ? ['image', 'video']
+          : isSeedance
+            ? ['image', 'video', 'audio']
+            : [];
+  const compatibleLibraryAssets = libraryAssets
+    .filter((asset) => supportedLibraryTypes.includes(asset.type) && asset.storageObjectId)
+    .slice(0, 12);
+
+  const isLibraryAssetSelected = (asset: LibraryAsset) => {
+    const storageId = asset.storageObjectId || '';
+    if (workflow === 'image-to-video') return imageStorageObjectId === storageId;
+    if (workflow === 'lip-sync') return asset.type === 'image' ? imageStorageObjectId === storageId : audioStorageObjectId === storageId;
+    if (asset.type === 'image') return referenceImages.some((item) => item.id === storageId);
+    if (asset.type === 'video') return referenceVideos.some((item) => item.id === storageId);
+    return referenceAudio.some((item) => item.id === storageId);
+  };
+
+  const selectLibraryAsset = (asset: LibraryAsset) => {
+    if (!asset.storageObjectId) return;
+    const reference: ReferenceFile = {
+      id: asset.storageObjectId,
+      url: asset.url,
+      kind: asset.type,
+      name: asset.prediction?.prompt?.slice(0, 48) || `Library ${asset.type}`,
+    };
+
+    if (workflow === 'image-to-video') {
+      setImageFile(null);
+      setImagePreview(asset.thumbnailUrl || asset.url);
+      setImageStorageObjectId(asset.storageObjectId);
+      return;
+    }
+    if (workflow === 'lip-sync') {
+      if (asset.type === 'image') {
+        setImageFile(null);
+        setImagePreview(asset.thumbnailUrl || asset.url);
+        setImageStorageObjectId(asset.storageObjectId);
+      } else if (asset.type === 'audio') {
+        setAudioFile(null);
+        setAudioFileName(reference.name);
+        setAudioStorageObjectId(asset.storageObjectId);
+      }
+      return;
+    }
+    if (isCharacterReplace) {
+      if (asset.type === 'image') setReferenceImages([reference]);
+      if (asset.type === 'video') {
+        setReferenceVideos([reference]);
+        setReferenceVideoDuration(null);
+      }
+      return;
+    }
+
+    const toggleReference = (
+      current: ReferenceFile[],
+      setCurrent: (items: ReferenceFile[]) => void,
+      maximum: number
+    ) => {
+      const exists = current.some((item) => item.id === reference.id);
+      setCurrent(exists ? current.filter((item) => item.id !== reference.id) : [...current, reference].slice(0, maximum));
+    };
+    if (asset.type === 'image') toggleReference(referenceImages, setReferenceImages, isNanoBanana ? 14 : 9);
+    if (asset.type === 'video') toggleReference(referenceVideos, setReferenceVideos, 3);
+    if (asset.type === 'audio') toggleReference(referenceAudio, setReferenceAudio, 3);
   };
 
   const pollPrediction = async (id: string, abortSignal: AbortController, variationIndex = 0) => {
@@ -457,6 +562,7 @@ export default function StudioPage() {
         generatePayload.params.resolution = isNanoBanana ? imageResolution : undefined;
         generatePayload.params.output_format = isNanoBanana ? imageOutputFormat : undefined;
         generatePayload.params.style = isRecraft ? recraftStyle : undefined;
+        generatePayload.params.reference_image_ids = isNanoBanana ? referenceImages.map((file) => file.id) : undefined;
       }
 
       if (isSeedance) {
@@ -570,6 +676,57 @@ export default function StudioPage() {
           })}
         </div>
 
+        {supportedLibraryTypes.length > 0 && (
+          <section className="glass-card asset-picker" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1rem' }}>Choose from your asset library</h3>
+                <p style={{ color: 'var(--foreground-muted)', fontSize: '0.8rem', margin: '0.3rem 0 0' }}>
+                  Reuse an existing {supportedLibraryTypes.join(', ')} file or upload a new one below.
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button className="btn btn-secondary" onClick={() => void loadLibraryAssets()} disabled={libraryLoading} style={{ padding: '0.5rem 0.75rem', fontSize: '0.75rem' }}>
+                  {libraryLoading ? 'Loading…' : 'Refresh'}
+                </button>
+                <a href="/library" className="btn btn-secondary" style={{ padding: '0.5rem 0.75rem', fontSize: '0.75rem' }}>Open library</a>
+              </div>
+            </div>
+            {compatibleLibraryAssets.length > 0 ? (
+              <div className="asset-picker-grid">
+                {compatibleLibraryAssets.map((asset) => {
+                  const selected = isLibraryAssetSelected(asset);
+                  return (
+                    <button
+                      key={asset.id}
+                      type="button"
+                      className={`asset-picker-card ${selected ? 'selected' : ''}`}
+                      onClick={() => selectLibraryAsset(asset)}
+                      title={asset.prediction?.prompt || `Uploaded ${asset.type}`}
+                    >
+                      <span className="asset-picker-preview">
+                        {asset.type === 'image' ? (
+                          <img src={asset.thumbnailUrl || asset.url} alt="" />
+                        ) : (
+                          <span aria-hidden="true">{asset.type === 'video' ? '🎬' : '🎵'}</span>
+                        )}
+                      </span>
+                      <span className="asset-picker-label">
+                        {asset.prediction?.prompt?.slice(0, 30) || `Uploaded ${asset.type}`}
+                      </span>
+                      <small>{selected ? 'Selected' : asset.type}</small>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <p style={{ color: 'var(--foreground-muted)', fontSize: '0.82rem', margin: 0 }}>
+                {libraryLoading ? 'Loading reusable assets…' : 'No compatible assets yet. Upload one below and it will appear here automatically.'}
+              </p>
+            )}
+          </section>
+        )}
+
         {/* Prompt Input & Assist */}
         <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
           {workflow === 'image-to-video' && (
@@ -599,7 +756,7 @@ export default function StudioPage() {
                   {imagePreview ? (
                     <>
                       <img src={imagePreview} alt="Preview" style={{ maxHeight: '150px', borderRadius: '8px' }} />
-                      <span style={{ fontSize: '0.85rem', color: 'var(--primary)' }}>✓ Image selected: {imageFile?.name}</span>
+                      <span style={{ fontSize: '0.85rem', color: 'var(--primary)' }}>✓ Image selected: {imageFile?.name || 'Library image'}</span>
                     </>
                   ) : (
                     <>
@@ -638,7 +795,7 @@ export default function StudioPage() {
                       {imagePreview ? (
                         <>
                           <img src={imagePreview} alt="Preview" style={{ maxHeight: '120px', borderRadius: '8px' }} />
-                          <span style={{ fontSize: '0.8rem', color: 'var(--primary)' }}>✓ {imageFile?.name}</span>
+                          <span style={{ fontSize: '0.8rem', color: 'var(--primary)' }}>✓ {imageFile?.name || 'Library image'}</span>
                         </>
                       ) : (
                         <>
@@ -659,7 +816,7 @@ export default function StudioPage() {
                       padding: '1.5rem',
                       textAlign: 'center',
                       cursor: 'pointer',
-                      background: audioFile ? 'rgba(139, 92, 246, 0.05)' : 'rgba(255, 255, 255, 0.02)',
+                      background: audioStorageObjectId ? 'rgba(139, 92, 246, 0.05)' : 'rgba(255, 255, 255, 0.02)',
                     }}
                   >
                     <input
@@ -670,7 +827,7 @@ export default function StudioPage() {
                       id="audio-upload"
                     />
                     <label htmlFor="audio-upload" style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                      {audioFile ? (
+                      {audioStorageObjectId ? (
                         <>
                           <span style={{ fontSize: '1.5rem' }}>🎵</span>
                           <span style={{ fontSize: '0.8rem', color: 'var(--primary)' }}>✓ {audioFileName}</span>
@@ -888,7 +1045,7 @@ export default function StudioPage() {
                   (isGrokImagineVideo && !prompt) ||
                   (workflow === 'multimodal-video' && !prompt) ||
                   (workflow === 'character-replace' && (!prompt || !referenceImages[0] || !referenceVideos[0])) ||
-                  (workflow === 'image-to-video' && !imageFile) ||
+                  (workflow === 'image-to-video' && !imageStorageObjectId) ||
                   (workflow === 'lip-sync' && (!imageStorageObjectId || !audioStorageObjectId)) || uploadProgress !== null ? 0.5 : 1 }}
               >
                 🚀 Generate Output

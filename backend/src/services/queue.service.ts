@@ -2,8 +2,9 @@ import { Queue, Worker, Job } from 'bullmq';
 import IORedis from 'ioredis';
 import { PrismaClient } from '@prisma/client';
 import { ReplicateService } from './replicate.service';
-import { createAssetForPrediction, createThumbnailForAsset, storeExistingAssetIfNeeded } from './asset.service';
+import { createAssetForPrediction, storeExistingAssetIfNeeded } from './asset.service';
 import { storageService } from './storage.service';
+import { thumbnailQueueService } from './thumbnail-queue.service';
 
 const prisma = new PrismaClient();
 const replicateService = new ReplicateService();
@@ -96,16 +97,17 @@ export class QueueService {
       console.log('Durable storage is not configured. Generated assets will use provider URLs.');
     }
 
-    const assetsWithoutThumbnails = await prisma.asset.findMany({
-      where: { thumbnailUrl: null, userId: { not: null } },
-      select: { id: true, userId: true, url: true, type: true, thumbnailUrl: true },
+    const assetsWithoutTrackedThumbnails = await prisma.asset.findMany({
+      where: { thumbnailStorageObjectId: null, userId: { not: null } },
+      select: { id: true },
       take: 25,
     });
-    let thumbnailCount = 0;
-    for (const asset of assetsWithoutThumbnails) {
-      if (await createThumbnailForAsset(asset)) thumbnailCount++;
+    for (const asset of assetsWithoutTrackedThumbnails) {
+      await thumbnailQueueService.add(asset.id);
     }
-    if (thumbnailCount > 0) console.log(`Generated ${thumbnailCount} missing asset thumbnail(s).`);
+    if (assetsWithoutTrackedThumbnails.length > 0) {
+      console.log(`Queued ${assetsWithoutTrackedThumbnails.length} missing or untracked asset thumbnail(s).`);
+    }
 
     const completedWithoutAssets = await prisma.prediction.findMany({
       where: {

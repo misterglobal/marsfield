@@ -6,7 +6,7 @@ const auth_middleware_1 = require("../middleware/auth.middleware");
 const router = (0, express_1.Router)();
 const prisma = new client_1.PrismaClient();
 // GET /api/v1/assets
-router.get('/', auth_middleware_1.authMiddleware, async (req, res) => {
+router.get('/', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('assets:read'), async (req, res) => {
     try {
         const user = req.user;
         if (!user) {
@@ -23,6 +23,34 @@ router.get('/', auth_middleware_1.authMiddleware, async (req, res) => {
                 res.status(404).json({ error: 'Project not found' });
                 return;
             }
+        }
+        // Older direct uploads predate Asset creation. Link them lazily so they
+        // become reusable without copying or re-uploading the underlying object.
+        const orphanedStorageObjects = await prisma.storageObject.findMany({
+            where: {
+                userId: user.id,
+                asset: null,
+                thumbnailForAsset: null,
+                mimeType: { not: null },
+            },
+            select: { id: true, url: true, mimeType: true, byteSize: true },
+        });
+        if (orphanedStorageObjects.length) {
+            await prisma.asset.createMany({
+                data: orphanedStorageObjects.map((object) => ({
+                    userId: user.id,
+                    storageObjectId: object.id,
+                    url: object.url,
+                    type: object.mimeType?.startsWith('image/')
+                        ? 'image'
+                        : object.mimeType?.startsWith('video/')
+                            ? 'video'
+                            : 'audio',
+                    thumbnailUrl: object.mimeType?.startsWith('image/') ? object.url : null,
+                    fileSize: object.byteSize,
+                })),
+                skipDuplicates: true,
+            });
         }
         const assets = await prisma.asset.findMany({
             where: {
@@ -64,7 +92,7 @@ router.get('/', auth_middleware_1.authMiddleware, async (req, res) => {
     }
 });
 // POST /api/v1/assets/:id/favorite
-router.post('/:id/favorite', auth_middleware_1.authMiddleware, async (req, res) => {
+router.post('/:id/favorite', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('assets:write'), async (req, res) => {
     try {
         const user = req.user;
         if (!user) {

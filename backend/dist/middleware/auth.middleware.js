@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.authMiddleware = authMiddleware;
+exports.requireScope = requireScope;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const client_1 = require("@prisma/client");
 const crypto_1 = require("crypto");
@@ -26,6 +27,9 @@ async function authMiddleware(req, res, next) {
                 where: { key: hashedKey },
                 select: {
                     id: true,
+                    scopes: true,
+                    expiresAt: true,
+                    revokedAt: true,
                     user: {
                         select: {
                             id: true,
@@ -37,12 +41,14 @@ async function authMiddleware(req, res, next) {
                     },
                 },
             });
-            if (!apiKey?.user) {
+            if (!apiKey?.user || apiKey.revokedAt || (apiKey.expiresAt && apiKey.expiresAt <= new Date())) {
                 res.status(401).json({ error: 'Invalid or expired authorization token' });
                 return;
             }
             req.user = apiKey.user;
             req.authType = 'api_key';
+            req.credentialId = apiKey.id;
+            req.apiKeyScopes = apiKey.scopes;
             void prisma.apiKey.update({
                 where: { id: apiKey.id },
                 data: { lastUsedAt: new Date() },
@@ -79,9 +85,23 @@ async function authMiddleware(req, res, next) {
         }
         req.user = user;
         req.authType = 'jwt';
+        req.credentialId = user.id;
         next();
     }
     catch (error) {
         res.status(401).json({ error: 'Invalid or expired authorization token' });
     }
+}
+function requireScope(scope) {
+    return (req, res, next) => {
+        if (req.authType !== 'api_key') {
+            next();
+            return;
+        }
+        if (!req.apiKeyScopes?.includes(scope)) {
+            res.status(403).json({ error: `API key requires the ${scope} scope` });
+            return;
+        }
+        next();
+    };
 }

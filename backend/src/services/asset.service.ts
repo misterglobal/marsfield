@@ -1,6 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { storageService } from './storage.service';
-import { createThumbnail } from './thumbnail.service';
+import { thumbnailQueueService } from './thumbnail-queue.service';
 
 const prisma = new PrismaClient();
 
@@ -84,40 +84,7 @@ export async function createAssetForPrediction(
     return createdAsset;
   });
 
-  await createThumbnailForAsset({
-    id: asset.id,
-    userId,
-    url: asset.url,
-    type: asset.type,
-    thumbnailUrl: asset.thumbnailUrl,
-  });
-}
-
-export async function createThumbnailForAsset(asset: {
-  id: string;
-  userId: string | null;
-  url: string;
-  type: string;
-  thumbnailUrl: string | null;
-}): Promise<boolean> {
-  if (!asset.userId || asset.thumbnailUrl) return false;
-  try {
-    const thumbnail = await createThumbnail({
-      sourceUrl: asset.url,
-      type: asset.type,
-      userId: asset.userId,
-      assetId: asset.id,
-    });
-    if (!thumbnail) return false;
-    await prisma.$transaction([
-      prisma.asset.update({ where: { id: asset.id }, data: { thumbnailUrl: thumbnail.url } }),
-      prisma.user.update({ where: { id: asset.userId }, data: { storageUsageBytes: { increment: thumbnail.byteSize } } }),
-    ]);
-    return true;
-  } catch (error) {
-    console.error(`Thumbnail generation failed for asset ${asset.id}:`, error instanceof Error ? error.message : error);
-    return false;
-  }
+  await thumbnailQueueService.add(asset.id);
 }
 
 export async function storeExistingAssetIfNeeded(asset: AssetForStorageBackfill): Promise<boolean> {
@@ -166,7 +133,7 @@ export async function storeExistingAssetIfNeeded(asset: AssetForStorageBackfill)
     });
   });
 
-  await createThumbnailForAsset({ ...asset, url: storedAsset.url, thumbnailUrl: null });
+  await thumbnailQueueService.add(asset.id);
 
   return true;
 }

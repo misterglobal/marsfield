@@ -6,7 +6,7 @@ const auth_middleware_1 = require("../middleware/auth.middleware");
 const router = (0, express_1.Router)();
 const prisma = new client_1.PrismaClient();
 // GET /api/v1/projects
-router.get('/', auth_middleware_1.authMiddleware, async (req, res) => {
+router.get('/', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('projects:read'), async (req, res) => {
     try {
         const user = req.user;
         if (!user) {
@@ -30,7 +30,7 @@ router.get('/', auth_middleware_1.authMiddleware, async (req, res) => {
     }
 });
 // GET /api/v1/projects/:id
-router.get('/:id', auth_middleware_1.authMiddleware, async (req, res) => {
+router.get('/:id', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('projects:read'), async (req, res) => {
     try {
         const user = req.user;
         if (!user) {
@@ -75,7 +75,7 @@ router.get('/:id', auth_middleware_1.authMiddleware, async (req, res) => {
     }
 });
 // POST /api/v1/projects
-router.post('/', auth_middleware_1.authMiddleware, async (req, res) => {
+router.post('/', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('projects:write'), async (req, res) => {
     try {
         const user = req.user;
         if (!user) {
@@ -103,7 +103,7 @@ router.post('/', auth_middleware_1.authMiddleware, async (req, res) => {
     }
 });
 // POST /api/v1/projects/:id/storyboard-scenes
-router.post('/:id/storyboard-scenes', auth_middleware_1.authMiddleware, async (req, res) => {
+router.post('/:id/storyboard-scenes', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('projects:write'), async (req, res) => {
     try {
         const user = req.user;
         if (!user) {

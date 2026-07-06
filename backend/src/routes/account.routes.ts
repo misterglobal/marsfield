@@ -7,13 +7,17 @@ import { buildFreemiusCheckoutUrl, getPlan, PLAN_CONFIG, PlanTier, serializePlan
 const router = Router();
 const prisma = new PrismaClient();
 const BILLABLE_TIERS = new Set<PlanTier>(['starter', 'creator', 'pro', 'studio']);
+const API_KEY_SCOPES = new Set([
+  'generation:write', 'predictions:read', 'uploads:write',
+  'assets:read', 'assets:write', 'projects:read', 'projects:write',
+]);
 
 function hashApiKey(key: string): string {
   return createHash('sha256').update(key).digest('hex');
 }
 
-function maskApiKey(id: string): string {
-  return `mf_live_${id.slice(0, 6)}...${id.slice(-4)}`;
+function maskApiKey(prefix: string | null, lastFour: string | null, id: string): string {
+  return `${prefix || `mf_live_${id.slice(0, 6)}`}...${lastFour || id.slice(-4)}`;
 }
 
 // GET /api/v1/account/usage
@@ -143,6 +147,10 @@ router.get('/api-keys', authMiddleware, async (req: AuthenticatedRequest, res: R
       res.status(401).json({ error: 'Unauthorized' });
       return;
     }
+    if (req.authType !== 'jwt') {
+      res.status(403).json({ error: 'API keys can only be managed from an authenticated browser session' });
+      return;
+    }
 
     const keys = await prisma.apiKey.findMany({
       where: { userId: user.id },
@@ -150,6 +158,12 @@ router.get('/api-keys', authMiddleware, async (req: AuthenticatedRequest, res: R
       select: {
         id: true,
         name: true,
+        prefix: true,
+        lastFour: true,
+        scopes: true,
+        expiresAt: true,
+        revokedAt: true,
+        revokedReason: true,
         lastUsedAt: true,
         createdAt: true,
       },
@@ -158,7 +172,12 @@ router.get('/api-keys', authMiddleware, async (req: AuthenticatedRequest, res: R
     res.json(keys.map((key) => ({
       id: key.id,
       name: key.name,
-      key: maskApiKey(key.id),
+      key: maskApiKey(key.prefix, key.lastFour, key.id),
+      scopes: key.scopes,
+      expires_at: key.expiresAt,
+      revoked_at: key.revokedAt,
+      revoked_reason: key.revokedReason,
+      status: key.revokedAt ? 'revoked' : key.expiresAt && key.expiresAt <= new Date() ? 'expired' : 'active',
       last_used_at: key.lastUsedAt,
       created_at: key.createdAt,
     })));
@@ -187,16 +206,38 @@ router.post('/api-keys', authMiddleware, async (req: AuthenticatedRequest, res: 
       return;
     }
 
+    const requestedScopes: string[] = Array.isArray(req.body.scopes)
+      ? req.body.scopes.map((scope: unknown) => String(scope))
+      : ['generation:write', 'predictions:read'];
+    const scopes: string[] = [...new Set<string>(requestedScopes)];
+    if (!scopes.length || scopes.some((scope) => !API_KEY_SCOPES.has(scope))) {
+      res.status(400).json({ error: 'Choose at least one valid API key scope' });
+      return;
+    }
+    const expiresInDays = req.body.expires_in_days === null || req.body.expires_in_days === undefined
+      ? null
+      : Number(req.body.expires_in_days);
+    if (expiresInDays !== null && (![30, 90, 365].includes(expiresInDays))) {
+      res.status(400).json({ error: 'API key expiry must be 30, 90, 365 days, or never' });
+      return;
+    }
+
     const plainKey = `mf_live_${randomBytes(24).toString('hex')}`;
     const created = await prisma.apiKey.create({
       data: {
         userId: user.id,
         name,
         key: hashApiKey(plainKey),
+        prefix: plainKey.slice(0, 14),
+        lastFour: plainKey.slice(-4),
+        scopes,
+        expiresAt: expiresInDays === null ? null : new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000),
       },
       select: {
         id: true,
         name: true,
+        scopes: true,
+        expiresAt: true,
         createdAt: true,
       },
     });
@@ -205,6 +246,8 @@ router.post('/api-keys', authMiddleware, async (req: AuthenticatedRequest, res: 
       id: created.id,
       name: created.name,
       key: plainKey,
+      scopes: created.scopes,
+      expires_at: created.expiresAt,
       created_at: created.createdAt,
     });
   } catch (error) {
@@ -228,7 +271,7 @@ router.delete('/api-keys/:id', authMiddleware, async (req: AuthenticatedRequest,
 
     const existing = await prisma.apiKey.findFirst({
       where: { id: req.params.id, userId: user.id },
-      select: { id: true },
+      select: { id: true, revokedAt: true },
     });
 
     if (!existing) {
@@ -236,7 +279,15 @@ router.delete('/api-keys/:id', authMiddleware, async (req: AuthenticatedRequest,
       return;
     }
 
-    await prisma.apiKey.delete({ where: { id: existing.id } });
+    if (!existing.revokedAt) {
+      await prisma.apiKey.update({
+        where: { id: existing.id },
+        data: {
+          revokedAt: new Date(),
+          revokedReason: typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 200) || 'Revoked by user' : 'Revoked by user',
+        },
+      });
+    }
     res.status(204).send();
   } catch (error) {
     console.error('Delete API key error:', error);

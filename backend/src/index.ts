@@ -10,6 +10,7 @@ import projectRouter from './routes/project.routes';
 import accountRouter from './routes/account.routes';
 import uploadRouter from './routes/upload.routes';
 import { queueService } from './services/queue.service';
+import { startRetentionScheduler } from './services/retention.service';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -46,4 +47,5 @@ app.listen(PORT, () => {
   void queueService.resumeIncompleteJobs().catch((error) => {
     console.error('Failed to resume incomplete generation jobs:', error);
   });
+  startRetentionScheduler();
 });

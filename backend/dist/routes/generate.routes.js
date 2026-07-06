@@ -9,6 +9,7 @@ const billing_service_1 = require("../services/billing.service");
 const crypto_1 = require("crypto");
 const asset_service_1 = require("../services/asset.service");
 const media_probe_service_1 = require("../services/media-probe.service");
+const rate_limit_middleware_1 = require("../middleware/rate-limit.middleware");
 const router = (0, express_1.Router)();
 const prisma = new client_1.PrismaClient();
 const replicateService = new replicate_service_1.ReplicateService();
@@ -90,7 +91,7 @@ async function resolveOwnedStorageObject(userId, value, allowedPrefix, label) {
     return url;
 }
 // POST /api/v1/generate
-router.post('/generate', auth_middleware_1.authMiddleware, async (req, res) => {
+router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('generation:write'), (0, rate_limit_middleware_1.rateLimit)('generation'), async (req, res) => {
     try {
         const user = req.user;
         if (!user) {
@@ -235,11 +236,15 @@ router.post('/generate', auth_middleware_1.authMiddleware, async (req, res) => {
                         throw new Error('Invalid Nano Banana aspect ratio');
                     if (!validFormats.includes(outputFormat))
                         throw new Error('Invalid Nano Banana output format');
+                    const imageInput = params?.reference_image_ids
+                        ? await resolveOwnedStorageObjects(user.id, params.reference_image_ids, 14, 'image/', 'Nano Banana reference images')
+                        : undefined;
                     predictionInput = {
                         prompt: prompt.trim(),
                         resolution: imageResolution,
                         aspect_ratio: imageAspectRatio,
                         output_format: outputFormat,
+                        image_input: imageInput || [],
                         ...(model === 'google/nano-banana-pro'
                             ? { safety_filter_level: 'block_only_high', allow_fallback_model: true }
                             : {}),
@@ -462,7 +467,7 @@ router.post('/generate', auth_middleware_1.authMiddleware, async (req, res) => {
     }
 });
 // GET /api/v1/predictions/:id
-router.get('/predictions/:id', auth_middleware_1.authMiddleware, async (req, res) => {
+router.get('/predictions/:id', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('predictions:read'), async (req, res) => {
     try {
         const user = req.user;
         if (!user) {

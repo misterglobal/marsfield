@@ -14,6 +14,7 @@ const project_routes_1 = __importDefault(require("./routes/project.routes"));
 const account_routes_1 = __importDefault(require("./routes/account.routes"));
 const upload_routes_1 = __importDefault(require("./routes/upload.routes"));
 const queue_service_1 = require("./services/queue.service");
+const retention_service_1 = require("./services/retention.service");
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 3001;
 // CORS Configuration - restrict to frontend origins
@@ -44,4 +45,5 @@ app.listen(PORT, () => {
     void queue_service_1.queueService.resumeIncompleteJobs().catch((error) => {
         console.error('Failed to resume incomplete generation jobs:', error);
     });
+    (0, retention_service_1.startRetentionScheduler)();
 });

@@ -13,6 +13,35 @@ The recommended implementation order is:
 
 The upload pipeline comes first because lip-sync, Seedance references, storyboard reference media, and future brand kits all need the same durable-file foundation.
 
+## Current status (July 5, 2026)
+
+| Original feature | Status | Shipped behavior |
+| --- | --- | --- |
+| Real upload pipeline | Complete | Authenticated multipart uploads are stored in R2, represented by owned `StorageObject` and `Asset` records, visible in the library, and reusable in compatible workflows. |
+| Lip-sync file handling | Complete | Portrait and audio inputs use owned storage object IDs and real file URLs. |
+| Storyboard-to-Studio generation | Complete | Scene actions open Studio with project/scene context and generations remain linked to the scene. |
+| Thumbnail generation | Complete | Image/video outputs receive WebP thumbnails with failure isolation and backfill support. |
+| API-key authentication | Complete | `mf_live_` bearer keys authenticate through the shared middleware and update `lastUsedAt`. |
+| Review, commit, and push cleanup | Pending | The accumulated feature work still needs an intentional final diff review and publication pass. |
+
+### Next production-hardening queue
+
+Shipped July 5, 2026: direct browser-to-R2 uploads now use 15-minute presigned URLs, reserve account storage quota, verify the completed R2 object, and create the durable library asset without routing bytes through the application containers.
+
+Shipped July 5, 2026: Redis-backed generation and upload rate limits now apply by plan to both the owning account and individual API key. Responses expose standard limit, remaining, reset, and retry headers; Redis outages fail open and log a bounded warning.
+
+Shipped July 5, 2026: retention cleanup removes unfinished direct uploads after one hour and Free-plan assets after seven days, including R2 originals/thumbnails, database links, prediction expiry, and storage-usage reconciliation. It supports bounded dry-run/manual commands and an explicitly enabled six-hour scheduler.
+
+Shipped July 5, 2026: API keys now support least-privilege scopes, optional 30/90/365-day expiry, recognizable masked prefixes, immediate soft revocation, and retained revocation history. Scope checks apply to generation, predictions, uploads, assets, and projects while browser JWT sessions remain unchanged.
+
+Shipped July 5, 2026: thumbnail creation now runs through a dedicated BullMQ worker with exponential retries and startup reconciliation. Every generated thumbnail receives its own `StorageObject` relation, byte accounting, idempotent processing, retention cleanup, and adoption of thumbnails created by the previous synchronous implementation.
+
+Shipped July 5, 2026: Playwright browser integration tests now verify direct upload sequencing, reuse of owned storage IDs, generation payload ownership boundaries, billing-history transparency, variation credit estimates, and overflow-free navigation across the four core mobile screens without calling paid providers.
+
+Run `npm run test:e2e:install` once, then run the suite with `npm run test:e2e`.
+
+The production-hardening queue is complete. The remaining release task is the intentional review, commit, and push cleanup described below.
+
 ## 1. Real upload pipeline for Seedance references
 
 ### User experience

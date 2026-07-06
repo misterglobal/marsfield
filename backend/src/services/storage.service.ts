@@ -1,4 +1,5 @@
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createHash, randomUUID } from 'crypto';
 import path from 'path';
 
@@ -36,6 +37,15 @@ interface R2Config {
   publicBaseUrl?: string;
   accessKeyId: string;
   secretAccessKey: string;
+}
+
+export interface PresignedUpload {
+  provider: string;
+  bucket: string;
+  key: string;
+  url: string;
+  uploadUrl: string;
+  expiresIn: number;
 }
 
 function envValue(name: string): string | undefined {
@@ -219,6 +229,65 @@ export class StorageService {
       byteSize: input.buffer.byteLength,
       checksum,
     };
+  }
+
+  public async createPresignedUpload(input: {
+    userId: string;
+    objectId: string;
+    mimeType: string;
+    assetType: string;
+    originalName: string;
+  }): Promise<PresignedUpload | null> {
+    if (!this.config || !this.client) return null;
+    const now = new Date();
+    const extension = extensionForAsset(input.originalName, input.mimeType, input.assetType);
+    const key = [
+      'users', input.userId, 'uploads', String(now.getUTCFullYear()),
+      String(now.getUTCMonth() + 1).padStart(2, '0'), `${input.objectId}.${extension}`,
+    ].join('/');
+    const expiresIn = 15 * 60;
+    const uploadUrl = await getSignedUrl(this.client, new PutObjectCommand({
+      Bucket: this.config.bucket,
+      Key: key,
+      ContentType: input.mimeType,
+    }), { expiresIn });
+    const publicBaseUrl = this.config.publicBaseUrl?.replace(/\/+$/, '');
+    const url = publicBaseUrl
+      ? `${publicBaseUrl}/${key}`
+      : `${this.config.endpoint}/${this.config.bucket}/${key}`;
+    return {
+      provider: 'cloudflare_r2',
+      bucket: this.config.bucket,
+      key,
+      url,
+      uploadUrl,
+      expiresIn,
+    };
+  }
+
+  public async inspectObject(key: string): Promise<{ byteSize: number; mimeType: string | null } | null> {
+    if (!this.config || !this.client) return null;
+    const object = await this.client.send(new HeadObjectCommand({
+      Bucket: this.config.bucket,
+      Key: key,
+    }));
+    return {
+      byteSize: Number(object.ContentLength || 0),
+      mimeType: object.ContentType || null,
+    };
+  }
+
+  public async deleteObject(key: string): Promise<boolean> {
+    if (!this.config || !this.client) return false;
+    await this.client.send(new DeleteObjectCommand({
+      Bucket: this.config.bucket,
+      Key: key,
+    }));
+    return true;
+  }
+
+  public thumbnailKey(userId: string, assetId: string): string {
+    return ['users', userId, 'thumbnails', `${assetId}.webp`].join('/');
   }
 
   private formatStorageError(error: unknown): string {

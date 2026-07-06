@@ -10,6 +10,7 @@ const client_1 = require("@prisma/client");
 const replicate_service_1 = require("./replicate.service");
 const asset_service_1 = require("./asset.service");
 const storage_service_1 = require("./storage.service");
+const thumbnail_queue_service_1 = require("./thumbnail-queue.service");
 const prisma = new client_1.PrismaClient();
 const replicateService = new replicate_service_1.ReplicateService();
 class QueueService {
@@ -83,18 +84,17 @@ class QueueService {
         else {
             console.log('Durable storage is not configured. Generated assets will use provider URLs.');
         }
-        const assetsWithoutThumbnails = await prisma.asset.findMany({
-            where: { thumbnailUrl: null, userId: { not: null } },
-            select: { id: true, userId: true, url: true, type: true, thumbnailUrl: true },
+        const assetsWithoutTrackedThumbnails = await prisma.asset.findMany({
+            where: { thumbnailStorageObjectId: null, userId: { not: null } },
+            select: { id: true },
             take: 25,
         });
-        let thumbnailCount = 0;
-        for (const asset of assetsWithoutThumbnails) {
-            if (await (0, asset_service_1.createThumbnailForAsset)(asset))
-                thumbnailCount++;
+        for (const asset of assetsWithoutTrackedThumbnails) {
+            await thumbnail_queue_service_1.thumbnailQueueService.add(asset.id);
         }
-        if (thumbnailCount > 0)
-            console.log(`Generated ${thumbnailCount} missing asset thumbnail(s).`);
+        if (assetsWithoutTrackedThumbnails.length > 0) {
+            console.log(`Queued ${assetsWithoutTrackedThumbnails.length} missing or untracked asset thumbnail(s).`);
+        }
         const completedWithoutAssets = await prisma.prediction.findMany({
             where: {
                 status: 'succeeded',

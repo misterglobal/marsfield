@@ -10,7 +10,22 @@ interface ApiKey {
   key: string;
   created_at: string;
   last_used_at: string | null;
+  scopes: string[];
+  expires_at: string | null;
+  revoked_at: string | null;
+  revoked_reason: string | null;
+  status: 'active' | 'expired' | 'revoked';
 }
+
+const API_SCOPES = [
+  ['generation:write', 'Submit generations'],
+  ['predictions:read', 'Read generation status'],
+  ['uploads:write', 'Upload reference media'],
+  ['assets:read', 'Read asset library'],
+  ['assets:write', 'Update assets'],
+  ['projects:read', 'Read projects'],
+  ['projects:write', 'Create projects and scenes'],
+] as const;
 
 interface UsageSummary {
   plan: string;
@@ -52,6 +67,8 @@ export default function SettingsPage() {
   const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [plans, setPlans] = useState<PlanSummary[]>([]);
   const [newKeyName, setNewKeyName] = useState('');
+  const [newKeyScopes, setNewKeyScopes] = useState<string[]>(['generation:write', 'predictions:read']);
+  const [newKeyExpiry, setNewKeyExpiry] = useState('90');
   const [newlyCreatedKey, setNewlyCreatedKey] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -88,7 +105,11 @@ export default function SettingsPage() {
     setNewlyCreatedKey('');
 
     try {
-      const created = await api.createApiKey({ name: newKeyName.trim() });
+      const created = await api.createApiKey({
+        name: newKeyName.trim(),
+        scopes: newKeyScopes,
+        expires_in_days: newKeyExpiry === 'never' ? null : Number(newKeyExpiry),
+      });
       setNewlyCreatedKey(created.key);
       setNewKeyName('');
       await loadSettings();
@@ -98,11 +119,11 @@ export default function SettingsPage() {
   };
 
   const handleRevokeKey = async (id: string) => {
-    if (!confirm('Are you sure you want to revoke this API key? This action is permanent.')) return;
+    if (!confirm('Revoke this API key immediately? Its audit record will be retained.')) return;
     setError('');
     try {
       await api.deleteApiKey(id);
-      setApiKeys((current) => current.filter((key) => key.id !== id));
+      await loadSettings();
     } catch (err: any) {
       setError(err.message || 'Failed to revoke API key');
     }
@@ -167,18 +188,38 @@ export default function SettingsPage() {
             Create access tokens for scripts and automation. Full keys are only shown once.
           </p>
 
-          <form className="api-key-form" onSubmit={handleGenerateKey} style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
-            <input
-              type="text"
-              placeholder="e.g. Production Script Token"
-              className="form-input"
-              value={newKeyName}
-              onChange={(event) => setNewKeyName(event.target.value)}
-              style={{ flex: 1 }}
-            />
-            <button type="submit" className="btn btn-primary" style={{ whiteSpace: 'nowrap' }}>
-              Create Key
-            </button>
+          <form className="api-key-form" onSubmit={handleGenerateKey} style={{ display: 'grid', gap: '0.75rem', marginTop: '0.5rem' }}>
+            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <input
+                type="text"
+                placeholder="e.g. Production Script Token"
+                className="form-input"
+                value={newKeyName}
+                onChange={(event) => setNewKeyName(event.target.value)}
+                style={{ flex: '1 1 240px' }}
+              />
+              <select className="form-input" value={newKeyExpiry} onChange={(event) => setNewKeyExpiry(event.target.value)} aria-label="API key expiry">
+                <option value="30">Expires in 30 days</option>
+                <option value="90">Expires in 90 days</option>
+                <option value="365">Expires in 1 year</option>
+                <option value="never">Never expires</option>
+              </select>
+              <button type="submit" className="btn btn-primary" disabled={!newKeyScopes.length} style={{ whiteSpace: 'nowrap' }}>
+                Create Key
+              </button>
+            </div>
+            <div style={{ display: 'flex', gap: '0.75rem 1rem', flexWrap: 'wrap' }}>
+              {API_SCOPES.map(([scope, label]) => (
+                <label key={scope} style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', fontSize: '0.8rem', color: 'var(--foreground-muted)' }}>
+                  <input
+                    type="checkbox"
+                    checked={newKeyScopes.includes(scope)}
+                    onChange={(event) => setNewKeyScopes((current) => event.target.checked ? [...current, scope] : current.filter((item) => item !== scope))}
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
           </form>
 
           <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
@@ -196,27 +237,28 @@ export default function SettingsPage() {
                   borderRadius: '10px',
                 }}
               >
-                <div>
+                <div style={{ minWidth: 0 }}>
                   <h4 style={{ fontSize: '0.9rem', margin: 0 }}>{key.name}</h4>
                   <code style={{ fontSize: '0.8rem', color: 'var(--primary)', marginTop: '0.2rem', display: 'block' }}>{key.key}</code>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--foreground-muted)' }}>
-                    Created {new Date(key.created_at).toLocaleDateString()}
+                  <span style={{ display: 'block', color: 'var(--foreground-muted)', fontSize: '0.72rem', marginTop: '0.25rem' }}>
+                    {key.scopes.join(', ')}
                   </span>
-                  <button
-                    onClick={() => void handleRevokeKey(key.id)}
-                    className="btn"
-                    style={{
-                      padding: '0.35rem 0.6rem',
-                      background: 'rgba(239, 68, 68, 0.1)',
-                      color: '#ef4444',
-                      borderRadius: '6px',
-                      fontSize: '0.75rem',
-                    }}
-                  >
-                    Revoke
-                  </button>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--foreground-muted)' }}>
+                    {key.status === 'active'
+                      ? key.expires_at ? `Expires ${new Date(key.expires_at).toLocaleDateString()}` : 'Never expires'
+                      : key.status === 'expired' ? 'Expired' : `Revoked ${key.revoked_at ? new Date(key.revoked_at).toLocaleDateString() : ''}`}
+                  </span>
+                  {key.status === 'active' && (
+                    <button
+                      onClick={() => void handleRevokeKey(key.id)}
+                      className="btn"
+                      style={{ padding: '0.35rem 0.6rem', background: 'rgba(239, 68, 68,0.1)', color: '#ef4444', borderRadius: '6px', fontSize: '0.75rem' }}
+                    >
+                      Revoke
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

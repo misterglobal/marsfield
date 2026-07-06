@@ -51,26 +51,40 @@ export const api = {
   }),
   getPrediction: (id: string) => request(`/predictions/${id}`),
 
-  uploadFile: (file: File, purpose = 'generation-reference', onProgress?: (percent: number) => void) => new Promise<any>((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${API_BASE_URL}/uploads`);
-    const token = localStorage.getItem('token');
-    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-    xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable) onProgress?.(Math.round((event.loaded / event.total) * 100));
-    };
-    xhr.onload = () => {
-      let data: any = {};
-      try { data = xhr.responseText ? JSON.parse(xhr.responseText) : {}; } catch { /* use generic error */ }
-      if (xhr.status >= 200 && xhr.status < 300) resolve(data);
-      else reject(new Error(data.error || `Upload failed with status ${xhr.status}`));
-    };
-    xhr.onerror = () => reject(new Error('Upload failed due to a network error'));
-    const body = new FormData();
-    body.append('file', file);
-    body.append('purpose', purpose);
-    xhr.send(body);
-  }),
+  uploadFile: async (file: File, purpose = 'generation-reference', onProgress?: (percent: number) => void) => {
+    const prepared = await request('/uploads/presign', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: file.name,
+        mime_type: file.type,
+        byte_size: file.size,
+        purpose,
+      }),
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', prepared.upload_url);
+      Object.entries(prepared.headers || {}).forEach(([name, value]) => xhr.setRequestHeader(name, String(value)));
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) onProgress?.(Math.round((event.loaded / event.total) * 95));
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) resolve();
+        else reject(new Error(`Direct storage upload failed with status ${xhr.status}`));
+      };
+      xhr.onerror = () => reject(new Error('Direct storage upload failed. Check the R2 bucket CORS policy.'));
+      xhr.send(file);
+    });
+
+    onProgress?.(98);
+    const completed = await request('/uploads/complete', {
+      method: 'POST',
+      body: JSON.stringify({ id: prepared.id }),
+    });
+    onProgress?.(100);
+    return completed;
+  },
 
   // Assets
   getAssets: (projectId?: string) => request(projectId ? `/assets?project_id=${encodeURIComponent(projectId)}` : '/assets'),

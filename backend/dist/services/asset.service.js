@@ -1,11 +1,10 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createAssetForPrediction = createAssetForPrediction;
-exports.createThumbnailForAsset = createThumbnailForAsset;
 exports.storeExistingAssetIfNeeded = storeExistingAssetIfNeeded;
 const client_1 = require("@prisma/client");
 const storage_service_1 = require("./storage.service");
-const thumbnail_service_1 = require("./thumbnail.service");
+const thumbnail_queue_service_1 = require("./thumbnail-queue.service");
 const prisma = new client_1.PrismaClient();
 async function createAssetForPrediction(prediction, outputUrl) {
     if (!prediction.userId)
@@ -64,36 +63,7 @@ async function createAssetForPrediction(prediction, outputUrl) {
         }
         return createdAsset;
     });
-    await createThumbnailForAsset({
-        id: asset.id,
-        userId,
-        url: asset.url,
-        type: asset.type,
-        thumbnailUrl: asset.thumbnailUrl,
-    });
-}
-async function createThumbnailForAsset(asset) {
-    if (!asset.userId || asset.thumbnailUrl)
-        return false;
-    try {
-        const thumbnail = await (0, thumbnail_service_1.createThumbnail)({
-            sourceUrl: asset.url,
-            type: asset.type,
-            userId: asset.userId,
-            assetId: asset.id,
-        });
-        if (!thumbnail)
-            return false;
-        await prisma.$transaction([
-            prisma.asset.update({ where: { id: asset.id }, data: { thumbnailUrl: thumbnail.url } }),
-            prisma.user.update({ where: { id: asset.userId }, data: { storageUsageBytes: { increment: thumbnail.byteSize } } }),
-        ]);
-        return true;
-    }
-    catch (error) {
-        console.error(`Thumbnail generation failed for asset ${asset.id}:`, error instanceof Error ? error.message : error);
-        return false;
-    }
+    await thumbnail_queue_service_1.thumbnailQueueService.add(asset.id);
 }
 async function storeExistingAssetIfNeeded(asset) {
     if (!asset.userId || !storage_service_1.storageService.isConfigured()) {
@@ -135,6 +105,6 @@ async function storeExistingAssetIfNeeded(asset) {
             data: { storageUsageBytes: { increment: storedAsset.byteSize } },
         });
     });
-    await createThumbnailForAsset({ ...asset, url: storedAsset.url, thumbnailUrl: null });
+    await thumbnail_queue_service_1.thumbnailQueueService.add(asset.id);
     return true;
 }
