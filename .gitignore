@@ -1,5 +1,11 @@
 node_modules
+playwright-report/
+test-results/
 /agents
 /qodo
 *.txt
 backend/.env
+.env
+DEPLOYMENT.md
+NEXT MOVE.md
+PRD.md

@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:3001/api/v1';
+const API_BASE_URL = '/api/v1';
 
 async function request(endpoint: string, options: RequestInit = {}) {
   const url = `${API_BASE_URL}${endpoint}`;
@@ -25,7 +25,12 @@ async function request(endpoint: string, options: RequestInit = {}) {
     throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
   }
 
-  return response.json();
+  if (response.status === 204) {
+    return null;
+  }
+
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
 }
 
 export const api = {
@@ -46,9 +51,72 @@ export const api = {
   }),
   getPrediction: (id: string) => request(`/predictions/${id}`),
 
+  uploadFile: async (file: File, purpose = 'generation-reference', onProgress?: (percent: number) => void) => {
+    const prepared = await request('/uploads/presign', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: file.name,
+        mime_type: file.type,
+        byte_size: file.size,
+        purpose,
+      }),
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', prepared.upload_url);
+      Object.entries(prepared.headers || {}).forEach(([name, value]) => xhr.setRequestHeader(name, String(value)));
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) onProgress?.(Math.round((event.loaded / event.total) * 95));
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) resolve();
+        else reject(new Error(`Direct storage upload failed with status ${xhr.status}`));
+      };
+      xhr.onerror = () => reject(new Error('Direct storage upload failed. Check the R2 bucket CORS policy.'));
+      xhr.send(file);
+    });
+
+    onProgress?.(98);
+    const completed = await request('/uploads/complete', {
+      method: 'POST',
+      body: JSON.stringify({ id: prepared.id }),
+    });
+    onProgress?.(100);
+    return completed;
+  },
+
   // Assets
-  getAssets: () => request('/assets'),
+  getAssets: (projectId?: string) => request(projectId ? `/assets?project_id=${encodeURIComponent(projectId)}` : '/assets'),
   toggleFavorite: (id: string) => request(`/assets/${id}/favorite`, {
     method: 'POST',
+  }),
+
+  // Projects / storyboards
+  getProjects: () => request('/projects'),
+  getProject: (id: string) => request(`/projects/${id}`),
+  createProject: (payload: any) => request('/projects', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  saveStoryboardScene: (projectId: string, payload: any) => request(`/projects/${projectId}/storyboard-scenes`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+
+  // Account
+  getUsage: () => request('/account/usage'),
+  getPlans: () => request('/account/plans'),
+  createCheckout: (payload: any) => request('/account/billing/checkout', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  getApiKeys: () => request('/account/api-keys'),
+  createApiKey: (payload: any) => request('/account/api-keys', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  deleteApiKey: (id: string) => request(`/account/api-keys/${id}`, {
+    method: 'DELETE',
   }),
 };

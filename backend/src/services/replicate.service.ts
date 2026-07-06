@@ -15,6 +15,10 @@ export interface PredictionInput {
   reference_audio?: Array<string | Blob>;
   first_frame_image?: string | Blob;
   last_frame_image?: string | Blob;
+  reference_video?: string;
+  video_reference_type?: 'feature' | 'base';
+  keep_original_sound?: boolean;
+  mode?: string;
   [key: string]: unknown;
 }
 
@@ -55,7 +59,7 @@ export class ReplicateService {
           outputUrl: this.getOutputUrl(prediction.output),
         };
       } catch (error) {
-        console.error("Replicate API Error:", error);
+        console.error("Replicate API Error:", this.formatReplicateError(error));
         throw error;
       }
     }
@@ -65,7 +69,7 @@ export class ReplicateService {
     return {
       id: mockId,
       status: 'succeeded',
-      outputUrl: model.includes('flux') || model.includes('diffusion')
+      outputUrl: model.includes('flux') || model.includes('diffusion') || model.includes('banana') || model.includes('recraft')
         ? 'https://picsum.photos/800/600' // Mock Image
         : 'https://www.w3schools.com/html/mov_bbb.mp4', // Mock Video
     };
@@ -82,7 +86,7 @@ export class ReplicateService {
           error: prediction.error,
         };
       } catch (error) {
-        console.error("Replicate status retrieve error:", error);
+        console.error("Replicate status retrieve error:", this.formatReplicateError(error));
         throw error;
       }
     }
@@ -104,5 +108,25 @@ export class ReplicateService {
       return candidate.url || candidate.uri;
     }
     return undefined;
+  }
+
+  private formatReplicateError(error: unknown): Record<string, unknown> {
+    if (!error || typeof error !== 'object') {
+      return { message: String(error) };
+    }
+
+    const value = error as {
+      name?: string;
+      message?: string;
+      response?: { status?: number; statusText?: string; url?: string };
+    };
+
+    return {
+      name: value.name,
+      message: value.message,
+      status: value.response?.status,
+      statusText: value.response?.statusText,
+      url: value.response?.url,
+    };
   }
 }

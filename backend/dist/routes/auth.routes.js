@@ -41,6 +41,7 @@ const client_1 = require("@prisma/client");
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const crypto = __importStar(require("crypto"));
+const freemius_service_1 = require("../services/freemius.service");
 const router = (0, express_1.Router)();
 const prisma = new client_1.PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -91,18 +92,22 @@ router.post('/register', async (req, res) => {
             res.status(400).json({ error: 'Invalid email format' });
             return;
         }
-        const existingUser = await prisma.user.findUnique({ where: { email } });
+        const normalizedEmail = email.toLowerCase();
+        const existingUser = await prisma.user.findUnique({ where: { email: normalizedEmail } });
         if (existingUser) {
             res.status(400).json({ error: 'Email already registered' });
             return;
         }
         const passwordHash = await hashPassword(password);
+        const freePlan = (0, freemius_service_1.getPlan)('free');
         const user = await prisma.user.create({
             data: {
-                email,
+                email: normalizedEmail,
                 passwordHash,
                 name: name || null,
-                creditsLimit: 10,
+                plan: 'free',
+                creditsLimit: freePlan.creditsLimit,
+                storageLimitBytes: freePlan.storageLimitBytes,
             },
         });
         const token = jsonwebtoken_1.default.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
@@ -121,7 +126,7 @@ router.post('/login', async (req, res) => {
             res.status(400).json({ error: 'Email and password are required' });
             return;
         }
-        const user = await prisma.user.findUnique({ where: { email } });
+        const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
         if (!user) {
             res.status(401).json({ error: 'Invalid credentials' });
             return;

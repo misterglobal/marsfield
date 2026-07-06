@@ -10,6 +10,12 @@
     "backend:dev": "npm run dev --workspace=backend",
     "frontend:dev": "npm run dev --workspace=frontend",
     "dev": "npm run dev --workspaces --parallel",
-    "build": "npm run build --workspaces"
+    "build": "npm run build --workspaces",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:install": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1"
   }
 }

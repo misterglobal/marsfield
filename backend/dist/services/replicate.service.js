@@ -36,7 +36,7 @@ class ReplicateService {
                 };
             }
             catch (error) {
-                console.error("Replicate API Error:", error);
+                console.error("Replicate API Error:", this.formatReplicateError(error));
                 throw error;
             }
         }
@@ -45,7 +45,7 @@ class ReplicateService {
         return {
             id: mockId,
             status: 'succeeded',
-            outputUrl: model.includes('flux') || model.includes('diffusion')
+            outputUrl: model.includes('flux') || model.includes('diffusion') || model.includes('banana') || model.includes('recraft')
                 ? 'https://picsum.photos/800/600' // Mock Image
                 : 'https://www.w3schools.com/html/mov_bbb.mp4', // Mock Video
         };
@@ -62,7 +62,7 @@ class ReplicateService {
                 };
             }
             catch (error) {
-                console.error("Replicate status retrieve error:", error);
+                console.error("Replicate status retrieve error:", this.formatReplicateError(error));
                 throw error;
             }
         }
@@ -83,6 +83,19 @@ class ReplicateService {
             return candidate.url || candidate.uri;
         }
         return undefined;
+    }
+    formatReplicateError(error) {
+        if (!error || typeof error !== 'object') {
+            return { message: String(error) };
+        }
+        const value = error;
+        return {
+            name: value.name,
+            message: value.message,
+            status: value.response?.status,
+            statusText: value.response?.statusText,
+            url: value.response?.url,
+        };
     }
 }
 exports.ReplicateService = ReplicateService;

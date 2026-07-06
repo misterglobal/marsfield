@@ -1,0 +1,76 @@
+export interface GenerationBillingInput {
+  workflow: string;
+  model: string;
+  params?: Record<string, unknown>;
+}
+
+export interface GenerationBillingQuote {
+  baseCredits: number;
+  variationCount: number;
+  variationCredits: number;
+  totalCredits: number;
+}
+
+const MAX_VARIATIONS_PER_REQUEST = 4;
+
+function parseVariationCount(params?: Record<string, unknown>): number {
+  const requested = params?.variations ?? params?.variation_count ?? 1;
+
+  if (requested === undefined || requested === null || requested === '') {
+    return 1;
+  }
+
+  if (typeof requested !== 'number' || !Number.isInteger(requested) || requested < 1 || requested > MAX_VARIATIONS_PER_REQUEST) {
+    throw new Error(`Variations must be an integer from 1 to ${MAX_VARIATIONS_PER_REQUEST}`);
+  }
+
+  return requested;
+}
+
+function getBaseCredits(input: GenerationBillingInput): number {
+  if (input.model === 'google/nano-banana-pro') {
+    return input.params?.resolution === '4K' ? 6 : 3;
+  }
+  if (input.model === 'google/nano-banana-2') {
+    return input.params?.resolution === '4K' ? 2 : 1;
+  }
+  if (input.workflow === 'text-to-image') return 1;
+
+  const requestedDuration = Number(input.params?.duration ?? 5);
+  const effectiveDuration = requestedDuration === -1 ? 15 : requestedDuration;
+  if (!Number.isFinite(effectiveDuration) || effectiveDuration <= 0) {
+    throw new Error('Duration must be a positive number or -1 for automatic duration');
+  }
+
+  if (input.model === 'kwaivgi/kling-v3-omni-video') {
+    const creditsPerSecond = input.params?.mode === 'standard' ? 5 : 7;
+    return Math.ceil(effectiveDuration) * creditsPerSecond;
+  }
+
+  if (input.model === 'xai/grok-imagine-video-1.5') {
+    return Math.ceil(effectiveDuration) * 2;
+  }
+
+  const durationBlocks = Math.max(1, Math.ceil(effectiveDuration / 5));
+  if (input.model === 'bytedance/seedance-2.0-mini') return 2 * durationBlocks;
+  if (input.model === 'bytedance/seedance-2.0-fast') return 3 * durationBlocks;
+  if (input.model === 'bytedance/seedance-2.0') return 4 * durationBlocks;
+  if (input.workflow.includes('video') || input.workflow === 'lip-sync') return 3 * durationBlocks;
+  return 1;
+}
+
+export function quoteGeneration(input: GenerationBillingInput): GenerationBillingQuote {
+  const baseCredits = getBaseCredits(input);
+  const variationCount = parseVariationCount(input.params);
+  const additionalOutputCredits = input.model === 'google/nano-banana-pro'
+    ? baseCredits
+    : Math.ceil(baseCredits * 0.75);
+  const variationCredits = Math.max(0, variationCount - 1) * additionalOutputCredits;
+
+  return {
+    baseCredits,
+    variationCount,
+    variationCredits,
+    totalCredits: baseCredits + variationCredits,
+  };
+}

@@ -20,7 +20,7 @@ interface AssetData {
 
 export default function LibraryPage() {
   const { token } = useAuth();
-  const [filter, setFilter] = useState<'all' | 'video' | 'image'>('all');
+  const [filter, setFilter] = useState<'all' | 'video' | 'image' | 'audio'>('all');
   const [search, setSearch] = useState('');
   const [assets, setAssets] = useState<AssetData[]>([]);
   const [loading, setLoading] = useState(false);
@@ -100,12 +100,12 @@ export default function LibraryPage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
 
       {/* Search & Filter Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
+      <div className="library-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', gap: '0.75rem' }}>
-          {['all', 'video', 'image'].map((type) => (
+          {['all', 'video', 'image', 'audio'].map((type) => (
             <button
               key={type}
-              onClick={() => setFilter(type as 'all' | 'video' | 'image')}
+              onClick={() => setFilter(type as 'all' | 'video' | 'image' | 'audio')}
               className={`btn ${filter === type ? 'btn-primary' : 'btn-secondary'}`}
               style={{ padding: '0.5rem 1.25rem', fontSize: '0.85rem', textTransform: 'capitalize' }}
             >
@@ -117,7 +117,7 @@ export default function LibraryPage() {
           </button>
         </div>
 
-        <div style={{ position: 'relative', width: '300px' }}>
+        <div className="library-search" style={{ position: 'relative', width: '300px' }}>
           <input
             type="text"
             placeholder="Search prompts..."
@@ -153,8 +153,13 @@ export default function LibraryPage() {
           {filteredAssets.map((asset, index) => (
             <article key={asset.id} className="asset-card">
               <div className="asset-preview" style={{ background: gradients[index % gradients.length] }}>
+                {asset.thumbnailUrl && (
+                  <img src={asset.thumbnailUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                )}
+                {!asset.thumbnailUrl && asset.type === 'audio' && <span style={{ fontSize: '3rem' }}>🎵</span>}
+                {!asset.thumbnailUrl && asset.type === 'video' && <span style={{ fontSize: '3rem' }}>🎬</span>}
                 <span className="asset-tag" style={{ textTransform: 'capitalize' }}>
-                  {asset.type === 'video' ? '🎬 Video' : '🖼️ Image'}
+                  {asset.type === 'video' ? '🎬 Video' : asset.type === 'audio' ? '🎵 Audio' : '🖼️ Image'}
                 </span>
                 <button
                   onClick={() => toggleFavorite(asset.id)}
@@ -175,11 +180,11 @@ export default function LibraryPage() {
 
               <div className="asset-meta">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h3 className="asset-title" title={asset.prediction?.prompt || 'Untitled'}>
-                    {(asset.prediction?.prompt || 'Untitled').substring(0, 40)}
+                  <h3 className="asset-title" title={asset.prediction?.prompt || `Uploaded ${asset.type}`}>
+                    {(asset.prediction?.prompt || `Uploaded ${asset.type}`).substring(0, 40)}
                   </h3>
                   <span className="badge badge-purple">
-                    {asset.prediction ? getModelName(asset.prediction.model) : 'Unknown'}
+                    {asset.prediction ? getModelName(asset.prediction.model) : 'Upload'}
                   </span>
                 </div>
                 <p style={{ fontSize: '0.8rem', color: 'var(--foreground-muted)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', height: '2.4rem', lineHeight: '1.2rem', margin: '0.25rem 0' }}>
