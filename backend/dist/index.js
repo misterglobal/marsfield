@@ -13,6 +13,7 @@ const asset_routes_1 = __importDefault(require("./routes/asset.routes"));
 const project_routes_1 = __importDefault(require("./routes/project.routes"));
 const account_routes_1 = __importDefault(require("./routes/account.routes"));
 const upload_routes_1 = __importDefault(require("./routes/upload.routes"));
+const kit_routes_1 = __importDefault(require("./routes/kit.routes"));
 const queue_service_1 = require("./services/queue.service");
 const retention_service_1 = require("./services/retention.service");
 const app = (0, express_1.default)();
@@ -34,6 +35,7 @@ app.use('/api/v1/account', account_routes_1.default);
 app.use('/api/v1/assets', asset_routes_1.default);
 app.use('/api/v1/projects', project_routes_1.default);
 app.use('/api/v1/uploads', upload_routes_1.default);
+app.use('/api/v1/kits', kit_routes_1.default);
 app.use('/api/v1', generate_routes_1.default);
 app.use('/api/v1/webhooks', webhook_routes_1.default);
 // Health check endpoint

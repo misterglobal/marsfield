@@ -26,7 +26,7 @@ export async function mockApi(page: Page, overrides: Record<string, Override> = 
       return;
     }
 
-    if (path === '/api/v1/assets' || path === '/api/v1/projects' || path === '/api/v1/account/api-keys' || path === '/api/v1/account/plans') {
+    if (path === '/api/v1/assets' || path === '/api/v1/projects' || path === '/api/v1/kits' || path === '/api/v1/account/api-keys' || path === '/api/v1/account/plans') {
       await route.fulfill({ json: [] });
       return;
     }

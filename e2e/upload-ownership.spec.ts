@@ -67,3 +67,33 @@ test('reuses an owned library asset without uploading it again', async ({ page }
   await expect(asset.getByText('Selected')).toBeVisible();
   await expect(page.getByRole('button', { name: /Generate Output/ })).toBeEnabled();
 });
+
+test('builds a general Kling edit from a preset and owned source video', async ({ page }) => {
+  let submittedBody: any;
+  await authenticate(page);
+  await mockApi(page, {
+    'GET /api/v1/assets': [{
+      id: 'asset-video', storageObjectId: 'storage-video', url: 'https://media.test/source.mp4',
+      thumbnailUrl: 'https://media.test/source.webp', type: 'video', prediction: null,
+    }],
+    'POST /api/v1/generate': async (route) => {
+      submittedBody = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ id: 'edit-1', status: 'succeeded', output_url: 'https://media.test/edited.mp4' }),
+      });
+    },
+  });
+
+  await page.goto('/');
+  await page.getByRole('button', { name: /Kling Video Edit/ }).click();
+  await page.locator('select:has(option[value="replace-background"])').selectOption('replace-background');
+  await expect(page.locator('textarea')).toHaveValue(/Replace the background/);
+  await page.getByRole('button', { name: /Uploaded video/ }).click();
+  await page.getByRole('button', { name: /Generate Output/ }).click();
+  await expect(page.getByText(/Generation Complete/)).toBeVisible();
+
+  expect(submittedBody.workflow).toBe('video-edit');
+  expect(submittedBody.params.reference_video_id).toBe('storage-video');
+  expect(submittedBody.params.video_reference_type).toBeUndefined();
+});

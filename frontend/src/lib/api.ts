@@ -91,6 +91,10 @@ export const api = {
   toggleFavorite: (id: string) => request(`/assets/${id}/favorite`, {
     method: 'POST',
   }),
+  quoteGeneration: (payload: any) => request('/generate/quote', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
 
   // Projects / storyboards
   getProjects: () => request('/projects'),
@@ -103,6 +107,16 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(payload),
   }),
+  createStoryboardPlan: (projectId: string, payload: any) => request(`/projects/${projectId}/storyboard-plan`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+
+  // Reusable character and brand kits
+  getKits: () => request('/kits'),
+  createKit: (payload: any) => request('/kits', { method: 'POST', body: JSON.stringify(payload) }),
+  updateKit: (id: string, payload: any) => request(`/kits/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  deleteKit: (id: string) => request(`/kits/${id}`, { method: 'DELETE' }),
 
   // Account
   getUsage: () => request('/account/usage'),

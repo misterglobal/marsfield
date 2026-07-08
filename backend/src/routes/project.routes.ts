@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authMiddleware, AuthenticatedRequest, requireScope } from '../middleware/auth.middleware';
+import { planStoryboard } from '../services/storyboard-planner.service';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -43,6 +44,21 @@ router.get('/:id', authMiddleware, requireScope('projects:read'), async (req: Au
     const project = await prisma.project.findFirst({
       where: { id: req.params.id, userId: user.id },
       include: {
+        kitAssignments: {
+          include: {
+            brandKit: {
+              include: {
+                kitAssets: {
+                  include: {
+                    asset: {
+                      select: { id: true, url: true, thumbnailUrl: true, type: true, storageObjectId: true },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
         scenes: {
           orderBy: { index: 'asc' },
           include: {
@@ -163,6 +179,85 @@ router.post('/:id/storyboard-scenes', authMiddleware, requireScope('projects:wri
   } catch (error) {
     console.error('Upsert storyboard scene error:', error);
     res.status(500).json({ error: 'Failed saving storyboard scene' });
+  }
+});
+
+// POST /api/v1/projects/:id/storyboard-plan
+router.post('/:id/storyboard-plan', authMiddleware, requireScope('projects:write'), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const project = await prisma.project.findFirst({
+      where: { id: req.params.id, userId: user.id },
+      select: { id: true },
+    });
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' });
+      return;
+    }
+
+    const script = typeof req.body.script === 'string' ? req.body.script.trim() : '';
+    const sceneCount = Number(req.body.scene_count);
+    const totalDurationSeconds = Number(req.body.total_duration_seconds);
+    if (script.length < 20 || script.length > 20_000) {
+      res.status(400).json({ error: 'Script must be between 20 and 20,000 characters' });
+      return;
+    }
+    if (!Number.isInteger(sceneCount) || sceneCount < 2 || sceneCount > 20) {
+      res.status(400).json({ error: 'Scene count must be between 2 and 20' });
+      return;
+    }
+    if (!Number.isInteger(totalDurationSeconds) || totalDurationSeconds < sceneCount || totalDurationSeconds > 300) {
+      res.status(400).json({ error: 'Total duration must fit the scene count and be no more than 300 seconds' });
+      return;
+    }
+
+    const plan = planStoryboard(script, {
+      sceneCount,
+      totalDurationSeconds,
+      visualStyle: typeof req.body.visual_style === 'string' ? req.body.visual_style : undefined,
+      aspectRatio: typeof req.body.aspect_ratio === 'string' ? req.body.aspect_ratio : undefined,
+      continuity: typeof req.body.continuity === 'string' ? req.body.continuity : undefined,
+    });
+
+    const existing = await prisma.storyboardScene.count({ where: { projectId: project.id } });
+    if (existing > 0 && req.body.replace_existing !== true) {
+      res.status(409).json({ error: 'This project already has scenes. Confirm replacement to create a new plan.' });
+      return;
+    }
+
+    await prisma.$transaction(async (transaction) => {
+      if (existing > 0) {
+        await transaction.prediction.updateMany({
+          where: { projectId: project.id, storyboardSceneId: { not: null } },
+          data: { storyboardSceneId: null },
+        });
+        await transaction.storyboardScene.deleteMany({ where: { projectId: project.id } });
+      }
+      await transaction.storyboardScene.createMany({
+        data: plan.map((scene) => ({
+          projectId: project.id,
+          index: scene.index,
+          title: scene.title,
+          prompt: scene.prompt,
+          notes: scene.notes,
+          durationSeconds: scene.durationSeconds,
+        })),
+      });
+    });
+
+    const scenes = await prisma.storyboardScene.findMany({
+      where: { projectId: project.id },
+      orderBy: { index: 'asc' },
+    });
+    res.status(201).json({ scenes, credits_charged: 0 });
+  } catch (error) {
+    console.error('Create storyboard plan error:', error);
+    res.status(500).json({ error: 'Failed creating storyboard plan' });
   }
 });
 

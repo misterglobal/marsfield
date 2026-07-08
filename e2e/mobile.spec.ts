@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { authenticate, mockApi } from './fixtures';
 
 test.describe('mobile layout', () => {
-  for (const path of ['/', '/projects', '/library', '/settings']) {
+  for (const path of ['/', '/projects', '/library', '/kits', '/settings']) {
     test(`${path} fits the viewport and exposes mobile navigation`, async ({ page }) => {
       await authenticate(page);
       await mockApi(page, {

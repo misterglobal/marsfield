@@ -5,6 +5,7 @@ exports.storeExistingAssetIfNeeded = storeExistingAssetIfNeeded;
 const client_1 = require("@prisma/client");
 const storage_service_1 = require("./storage.service");
 const thumbnail_queue_service_1 = require("./thumbnail-queue.service");
+const model_registry_1 = require("../config/model-registry");
 const prisma = new client_1.PrismaClient();
 async function createAssetForPrediction(prediction, outputUrl) {
     if (!prediction.userId)
@@ -16,7 +17,7 @@ async function createAssetForPrediction(prediction, outputUrl) {
     });
     if (existingAsset)
         return;
-    const type = prediction.workflow === 'text-to-image' ? 'image' : 'video';
+    const type = (0, model_registry_1.getModelDefinition)(prediction.model)?.output || (['text-to-image', 'image-upscale'].includes(prediction.workflow) ? 'image' : 'video');
     let storedAsset = null;
     try {
         storedAsset = await storage_service_1.storageService.storeRemoteAsset({

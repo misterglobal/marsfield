@@ -10,25 +10,15 @@ const crypto_1 = require("crypto");
 const asset_service_1 = require("../services/asset.service");
 const media_probe_service_1 = require("../services/media-probe.service");
 const rate_limit_middleware_1 = require("../middleware/rate-limit.middleware");
+const model_registry_1 = require("../config/model-registry");
 const router = (0, express_1.Router)();
 const prisma = new client_1.PrismaClient();
 const replicateService = new replicate_service_1.ReplicateService();
-const SEEDANCE_MODELS = new Set([
-    'bytedance/seedance-2.0',
-    'bytedance/seedance-2.0-fast',
-    'bytedance/seedance-2.0-mini',
-]);
-const NANO_BANANA_MODELS = new Set([
-    'google/nano-banana-2',
-    'google/nano-banana-pro',
-]);
-const IMAGE_MODELS = new Set([
-    'black-forest-labs/flux-schnell',
-    'stability-ai/stable-diffusion-3',
-    'google/nano-banana-2',
-    'google/nano-banana-pro',
-    'recraft-ai/recraft-v3',
-]);
+const SEEDANCE_MODELS = (0, model_registry_1.modelIdsForFamily)('seedance');
+const NANO_BANANA_MODELS = (0, model_registry_1.modelIdsForFamily)('nano-banana');
+const IMAGE_MODELS = new Set(['general', 'nano-banana', 'recraft'].flatMap((family) => Array.from((0, model_registry_1.modelIdsForFamily)(family))).filter((id) => (0, model_registry_1.getModelDefinition)(id)?.workflow === 'text-to-image'));
+const VIDEO_ENHANCEMENT_MODELS = (0, model_registry_1.modelIdsForFamily)('video-enhance');
+const IMAGE_UPSCALE_MODELS = (0, model_registry_1.modelIdsForFamily)('image-upscale');
 function decodeFileInput(value, maximumBytes) {
     if (typeof value !== 'string') {
         throw new Error('Reference inputs must be URLs or data URIs');
@@ -90,6 +80,63 @@ async function resolveOwnedStorageObject(userId, value, allowedPrefix, label) {
     const [url] = await resolveOwnedStorageObjects(userId, [value], 1, allowedPrefix, label) || [];
     return url;
 }
+// POST /api/v1/generate/quote - exact enhancement quote after media inspection
+router.post('/generate/quote', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('generation:write'), (0, rate_limit_middleware_1.rateLimit)('quote'), async (req, res) => {
+    try {
+        if (!req.user) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+        const { workflow, model, params = {} } = req.body;
+        const billingParams = { ...params };
+        if (workflow === 'video-enhance' && VIDEO_ENHANCEMENT_MODELS.has(model)) {
+            const object = await prisma.storageObject.findFirst({
+                where: { id: String(req.body.video_storage_object_id || ''), userId: req.user.id },
+                select: { url: true, mimeType: true },
+            });
+            if (!object?.url || !object.mimeType?.startsWith('video/'))
+                throw new Error('Owned video asset required');
+            const metadata = await (0, media_probe_service_1.getRemoteVideoMetadata)(object.url);
+            billingParams.duration = metadata.duration;
+            billingParams.input_megapixels = (metadata.width * metadata.height) / 1_000_000;
+            billingParams.input_fps = metadata.fps;
+            if (model === 'xai/grok-imagine-video-extension') {
+                const extension = Number(params.duration ?? 6);
+                billingParams.output_duration = metadata.duration + extension;
+            }
+        }
+        else if (workflow === 'image-upscale' && IMAGE_UPSCALE_MODELS.has(model)) {
+            const image = await resolveOwnedStorageObject(req.user.id, req.body.image_storage_object_id, 'image/', 'Upscale image');
+            if (!image)
+                throw new Error('Owned image asset required');
+            const inputMegapixels = await (0, media_probe_service_1.getRemoteImageMegapixels)(image);
+            billingParams.input_megapixels = inputMegapixels;
+            billingParams.output_megapixels = model === 'prunaai/p-image-upscale'
+                ? Number(params.target ?? 8)
+                : inputMegapixels * (model === 'google/upscaler'
+                    ? (params.upscale_factor === 'x4' ? 16 : 4)
+                    : Number(params.scale_factor ?? 2) ** 2);
+        }
+        else {
+            throw new Error('Exact quotes are available for enhancement workflows');
+        }
+        const quote = (0, billing_service_1.quoteGeneration)({ workflow, model, params: billingParams });
+        res.json({
+            credits: quote.totalCredits,
+            base_credits: quote.baseCredits,
+            inspected: {
+                duration: billingParams.duration,
+                input_megapixels: billingParams.input_megapixels,
+                input_fps: billingParams.input_fps,
+                output_megapixels: billingParams.output_megapixels,
+                output_duration: billingParams.output_duration,
+            },
+        });
+    }
+    catch (error) {
+        res.status(400).json({ error: error instanceof Error ? error.message : 'Could not quote enhancement' });
+    }
+});
 // POST /api/v1/generate
 router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('generation:write'), (0, rate_limit_middleware_1.rateLimit)('generation'), async (req, res) => {
     try {
@@ -105,7 +152,7 @@ router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1
             return;
         }
         // Validate workflow
-        const validWorkflows = ['text-to-video', 'image-to-video', 'lip-sync', 'text-to-image', 'multi-image-video', 'multimodal-video', 'character-replace'];
+        const validWorkflows = ['text-to-video', 'image-to-video', 'lip-sync', 'text-to-image', 'multi-image-video', 'multimodal-video', 'character-replace', 'video-edit', 'video-enhance', 'image-upscale'];
         if (!validWorkflows.includes(workflow)) {
             res.status(400).json({ error: 'Invalid workflow type' });
             return;
@@ -118,6 +165,10 @@ router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1
         // Validate model string (prevent injection)
         if (!/^[\w\-\.\/]+$/.test(model)) {
             res.status(400).json({ error: 'Invalid model identifier' });
+            return;
+        }
+        if (!(0, model_registry_1.modelSupportsWorkflow)(model, workflow)) {
+            res.status(400).json({ error: 'Selected model is not registered for this workflow' });
             return;
         }
         const isSeedance = SEEDANCE_MODELS.has(model);
@@ -172,14 +223,30 @@ router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1
                     last_frame_image: lastFrameImage,
                 };
             }
-            else if (workflow === 'character-replace') {
+            else if (workflow === 'character-replace' || workflow === 'video-edit') {
                 if (model !== 'kwaivgi/kling-v3-omni-video') {
-                    throw new Error('Character replacement requires Kling V3 Omni Video');
+                    throw new Error('Video editing requires Kling V3 Omni Video');
                 }
-                const [referenceImage] = await resolveOwnedStorageObjects(user.id, params?.reference_image_ids, 1, 'image/', 'Character reference image') || [];
-                const referenceVideo = await resolveOwnedStorageObject(user.id, params?.reference_video_id, 'video/', 'Reference video');
-                if (!referenceImage || !referenceVideo) {
-                    throw new Error('Character replacement requires one reference image and one reference video');
+                const referenceImages = await resolveOwnedStorageObjects(user.id, params?.reference_image_ids || [], workflow === 'character-replace' ? 1 : 4, 'image/', 'Edit reference images') || [];
+                const referenceVideoId = typeof params?.reference_video_id === 'string' ? params.reference_video_id : '';
+                const referenceVideoObject = referenceVideoId
+                    ? await prisma.storageObject.findFirst({
+                        where: { id: referenceVideoId, userId: user.id },
+                        select: { url: true, mimeType: true },
+                    })
+                    : null;
+                const referenceVideo = referenceVideoObject?.url;
+                if (!referenceVideo) {
+                    throw new Error('Video editing requires one reference video');
+                }
+                if (!['video/mp4', 'video/quicktime'].includes(referenceVideoObject?.mimeType || '')) {
+                    throw new Error('Kling video editing requires an MP4 or MOV source video');
+                }
+                if (workflow === 'character-replace' && !referenceImages[0]) {
+                    throw new Error('Character replacement requires one reference image');
+                }
+                if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 2500) {
+                    throw new Error('Video editing requires a prompt no longer than 2500 characters');
                 }
                 const referenceDuration = await (0, media_probe_service_1.getRemoteVideoDuration)(referenceVideo);
                 if (referenceDuration < 3 || referenceDuration > 10.05) {
@@ -191,8 +258,8 @@ router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1
                 billingParams.duration = referenceDuration;
                 billingParams.mode = mode;
                 predictionInput = {
-                    prompt: prompt || 'Replace the person in <<<video_1>>> with the person from <<<image_1>>>, preserving the original motion, framing, lighting, and scene.',
-                    reference_images: [referenceImage],
+                    prompt: prompt.trim(),
+                    reference_images: referenceImages.length ? referenceImages : undefined,
                     reference_video: referenceVideo,
                     video_reference_type: 'base',
                     mode,
@@ -201,6 +268,101 @@ router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1
                     generate_audio: false,
                     keep_original_sound: params?.keep_original_sound !== false,
                 };
+            }
+            else if (workflow === 'video-enhance') {
+                if (!VIDEO_ENHANCEMENT_MODELS.has(model))
+                    throw new Error('Unsupported video enhancement model');
+                const videoId = typeof req.body.video_storage_object_id === 'string' ? req.body.video_storage_object_id : '';
+                const videoObject = videoId ? await prisma.storageObject.findFirst({
+                    where: { id: videoId, userId: user.id }, select: { url: true, mimeType: true },
+                }) : null;
+                if (!videoObject?.url || !videoObject.mimeType?.startsWith('video/')) {
+                    throw new Error('Video enhancement requires an owned video asset');
+                }
+                const metadata = await (0, media_probe_service_1.getRemoteVideoMetadata)(videoObject.url);
+                billingParams.duration = metadata.duration;
+                billingParams.input_megapixels = (metadata.width * metadata.height) / 1_000_000;
+                billingParams.input_fps = metadata.fps;
+                if (model === 'xai/grok-imagine-video-extension') {
+                    const extensionDuration = Number(params?.duration ?? 6);
+                    if (videoObject.mimeType !== 'video/mp4')
+                        throw new Error('Grok video extension requires an MP4 source');
+                    if (metadata.duration < 2 || metadata.duration > 15.05)
+                        throw new Error('Grok source video must be between 2 and 15 seconds');
+                    if (!Number.isInteger(extensionDuration) || extensionDuration < 2 || extensionDuration > 10) {
+                        throw new Error('Grok extension duration must be an integer from 2 to 10 seconds');
+                    }
+                    if (typeof prompt !== 'string' || !prompt.trim())
+                        throw new Error('Grok extension requires a prompt');
+                    billingParams.output_duration = metadata.duration + extensionDuration;
+                    predictionInput = { video: videoObject.url, prompt: prompt.trim(), duration: extensionDuration };
+                }
+                else if (model === 'topazlabs/video-upscale') {
+                    const targetResolution = params?.target_resolution || '1080p';
+                    const targetFps = Number(params?.target_fps ?? 30);
+                    if (!['720p', '1080p', '4k'].includes(targetResolution))
+                        throw new Error('Invalid Topaz target resolution');
+                    if (!Number.isInteger(targetFps) || targetFps < 15 || targetFps > 60)
+                        throw new Error('Topaz target FPS must be from 15 to 60');
+                    billingParams.target_resolution = targetResolution;
+                    billingParams.target_fps = targetFps;
+                    predictionInput = { video: videoObject.url, target_resolution: targetResolution, target_fps: targetFps };
+                }
+                else {
+                    const scaleFactor = Number(params?.scale_factor ?? 2);
+                    if (!Number.isFinite(scaleFactor) || scaleFactor < 1 || scaleFactor > 8)
+                        throw new Error('Crystal scale factor must be from 1 to 8');
+                    billingParams.scale_factor = scaleFactor;
+                    predictionInput = { video: videoObject.url, scale_factor: scaleFactor };
+                }
+            }
+            else if (workflow === 'image-upscale') {
+                if (!IMAGE_UPSCALE_MODELS.has(model))
+                    throw new Error('Unsupported image upscaling model');
+                const image = await resolveOwnedStorageObject(user.id, req.body.image_storage_object_id, 'image/', 'Upscale image');
+                if (!image)
+                    throw new Error('Image upscaling requires an owned image asset');
+                const inputMegapixels = await (0, media_probe_service_1.getRemoteImageMegapixels)(image);
+                billingParams.input_megapixels = inputMegapixels;
+                if (model === 'prunaai/p-image-upscale') {
+                    const target = Number(params?.target ?? 8);
+                    const outputFormat = params?.output_format || 'jpg';
+                    const outputQuality = Number(params?.output_quality ?? 90);
+                    if (!Number.isInteger(target) || target < 1 || target > 128)
+                        throw new Error('Pruna target must be from 1 to 128 megapixels');
+                    if (!['jpg', 'png', 'webp'].includes(outputFormat))
+                        throw new Error('Invalid Pruna output format');
+                    if (!Number.isInteger(outputQuality) || outputQuality < 0 || outputQuality > 100)
+                        throw new Error('Output quality must be from 0 to 100');
+                    billingParams.output_megapixels = target;
+                    predictionInput = {
+                        image, upscale_mode: 'target', target, output_format: outputFormat, output_quality: outputQuality,
+                        enhance_details: params?.enhance_details === true, enhance_realism: params?.enhance_realism === true,
+                    };
+                }
+                else if (model === 'google/upscaler') {
+                    const upscaleFactor = params?.upscale_factor || 'x2';
+                    const compressionQuality = Number(params?.compression_quality ?? 90);
+                    if (!['x2', 'x4'].includes(upscaleFactor))
+                        throw new Error('Google upscale factor must be x2 or x4');
+                    if (!Number.isInteger(compressionQuality) || compressionQuality < 1 || compressionQuality > 100)
+                        throw new Error('Compression quality must be from 1 to 100');
+                    billingParams.output_megapixels = inputMegapixels * (upscaleFactor === 'x4' ? 16 : 4);
+                    predictionInput = { image, upscale_factor: upscaleFactor, compression_quality: compressionQuality };
+                }
+                else {
+                    const scaleFactor = Number(params?.scale_factor ?? 2);
+                    const creativity = Number(params?.creativity ?? 0);
+                    const outputFormat = params?.output_format || 'png';
+                    if (![2, 4].includes(scaleFactor))
+                        throw new Error('Clarity Pro scale factor must be 2 or 4');
+                    if (!Number.isFinite(creativity) || creativity < -10 || creativity > 10)
+                        throw new Error('Clarity creativity must be from -10 to 10');
+                    if (!['png', 'jpg'].includes(outputFormat))
+                        throw new Error('Invalid Clarity output format');
+                    billingParams.output_megapixels = inputMegapixels * scaleFactor * scaleFactor;
+                    predictionInput = { image, scale_factor: scaleFactor, creativity, output_format: outputFormat };
+                }
             }
             else if (workflow === 'lip-sync') {
                 const image = await resolveOwnedStorageObject(user.id, req.body.image_storage_object_id, 'image/', 'Lip-sync image');
@@ -339,11 +501,25 @@ router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1
         if (projectId) {
             const project = await prisma.project.findFirst({
                 where: { id: projectId, userId: user.id },
-                select: { id: true },
+                select: {
+                    id: true,
+                    kitAssignments: {
+                        select: {
+                            brandKit: { select: { name: true, kind: true, description: true, promptRules: true, voice: true, colors: true, fonts: true } },
+                        },
+                    },
+                },
             });
             if (!project) {
                 res.status(404).json({ error: 'Project not found' });
                 return;
+            }
+            if (typeof predictionInput.prompt === 'string' && project.kitAssignments.length) {
+                const rules = project.kitAssignments.map(({ brandKit: kit }) => {
+                    const details = [kit.description, kit.promptRules, kit.voice ? `Voice/tone: ${kit.voice}` : '', Array.isArray(kit.colors) ? `Colors: ${kit.colors.join(', ')}` : '', Array.isArray(kit.fonts) ? `Fonts: ${kit.fonts.join(', ')}` : ''].filter(Boolean).join(' ');
+                    return `${kit.kind === 'character' ? 'Character' : 'Brand'} ${kit.name}: ${details}`;
+                }).join('\n');
+                predictionInput.prompt = `${predictionInput.prompt}\n\nProject kit rules (server enforced):\n${rules}`.slice(0, 8000);
             }
         }
         if (storyboardSceneId) {
@@ -379,7 +555,7 @@ router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1
                     storyboardSceneId,
                     workflow,
                     model,
-                    prompt: prompt || null,
+                    prompt: typeof predictionInput.prompt === 'string' ? predictionInput.prompt : prompt || null,
                     inputParams: isSeedance
                         ? {
                             duration: params?.duration ?? 5,

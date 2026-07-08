@@ -8,70 +8,71 @@ generator client {
 }
 
 model User {
-  id           String       @id @default(uuid())
-  email        String       @unique
-  passwordHash String       @map("password_hash")
-  name         String?
-  plan         String       @default("free")
-  creditsUsed  Int          @default(0) @map("credits_used")
-  creditsLimit Int          @default(15) @map("credits_limit")
-  storageUsageBytes Int     @default(0) @map("storage_usage_bytes")
-  storageLimitBytes BigInt  @default(1073741824) @map("storage_limit_bytes")
-  createdAt    DateTime     @default(now()) @map("created_at")
-  projects     Project[]
-  predictions  Prediction[]
-  assets       Asset[]
-  apiKeys      ApiKey[]
-  usageEvents  UsageEvent[]
-  storageObjects StorageObject[]
-  brandKits    BrandKit[]
+  id                   String                @id @default(uuid())
+  email                String                @unique
+  passwordHash         String                @map("password_hash")
+  name                 String?
+  plan                 String                @default("free")
+  creditsUsed          Int                   @default(0) @map("credits_used")
+  creditsLimit         Int                   @default(15) @map("credits_limit")
+  storageUsageBytes    Int                   @default(0) @map("storage_usage_bytes")
+  storageLimitBytes    BigInt                @default(1073741824) @map("storage_limit_bytes")
+  createdAt            DateTime              @default(now()) @map("created_at")
+  projects             Project[]
+  predictions          Prediction[]
+  assets               Asset[]
+  apiKeys              ApiKey[]
+  usageEvents          UsageEvent[]
+  storageObjects       StorageObject[]
+  brandKits            BrandKit[]
   freemiusEntitlements FreemiusEntitlement[]
-  billingEvents BillingEvent[]
+  billingEvents        BillingEvent[]
 
   @@map("users")
 }
 
 model Project {
-  id          String            @id @default(uuid())
-  userId      String            @map("user_id")
-  user        User              @relation(fields: [userId], references: [id])
-  name        String
-  description String?
-  createdAt   DateTime          @default(now()) @map("created_at")
-  updatedAt   DateTime          @updatedAt @map("updated_at")
-  predictions Prediction[]
-  assets      Asset[]
-  scenes      StoryboardScene[]
-  brandKits   BrandKit[]
+  id             String                 @id @default(uuid())
+  userId         String                 @map("user_id")
+  user           User                   @relation(fields: [userId], references: [id])
+  name           String
+  description    String?
+  createdAt      DateTime               @default(now()) @map("created_at")
+  updatedAt      DateTime               @updatedAt @map("updated_at")
+  predictions    Prediction[]
+  assets         Asset[]
+  scenes         StoryboardScene[]
+  brandKits      BrandKit[]
+  kitAssignments ProjectKitAssignment[]
 
   @@index([userId, createdAt])
   @@map("projects")
 }
 
 model Prediction {
-  id                     String    @id @default(uuid())
-  userId                 String?   @map("user_id")
-  user                   User?     @relation(fields: [userId], references: [id])
-  projectId              String?   @map("project_id")
-  project                Project?  @relation(fields: [projectId], references: [id])
-  storyboardSceneId      String?   @map("storyboard_scene_id")
-  storyboardScene        StoryboardScene? @relation(fields: [storyboardSceneId], references: [id])
-  workflow               String
-  model                  String
-  prompt                 String?
-  inputParams            Json?     @map("input_params")
-  variationGroupId       String?   @map("variation_group_id")
-  variationIndex         Int       @default(0) @map("variation_index")
-  variationCount         Int       @default(1) @map("variation_count")
-  creditCost             Int       @default(1) @map("credit_cost")
-  status                 String    @default("pending")
-  replicatePredictionId  String?   @map("replicate_prediction_id")
-  outputUrl              String?   @map("output_url")
-  errorMessage           String?   @map("error_message")
-  createdAt              DateTime  @default(now()) @map("created_at")
-  completedAt            DateTime? @map("completed_at")
-  assets                 Asset[]
-  usageEvents            UsageEvent[]
+  id                    String           @id @default(uuid())
+  userId                String?          @map("user_id")
+  user                  User?            @relation(fields: [userId], references: [id])
+  projectId             String?          @map("project_id")
+  project               Project?         @relation(fields: [projectId], references: [id])
+  storyboardSceneId     String?          @map("storyboard_scene_id")
+  storyboardScene       StoryboardScene? @relation(fields: [storyboardSceneId], references: [id])
+  workflow              String
+  model                 String
+  prompt                String?
+  inputParams           Json?            @map("input_params")
+  variationGroupId      String?          @map("variation_group_id")
+  variationIndex        Int              @default(0) @map("variation_index")
+  variationCount        Int              @default(1) @map("variation_count")
+  creditCost            Int              @default(1) @map("credit_cost")
+  status                String           @default("pending")
+  replicatePredictionId String?          @map("replicate_prediction_id")
+  outputUrl             String?          @map("output_url")
+  errorMessage          String?          @map("error_message")
+  createdAt             DateTime         @default(now()) @map("created_at")
+  completedAt           DateTime?        @map("completed_at")
+  assets                Asset[]
+  usageEvents           UsageEvent[]
 
   @@index([userId, createdAt])
   @@index([projectId, createdAt])
@@ -80,23 +81,24 @@ model Prediction {
 }
 
 model Asset {
-  id           String      @id @default(uuid())
-  userId       String?     @map("user_id")
-  user         User?       @relation(fields: [userId], references: [id])
-  projectId    String?     @map("project_id")
-  project      Project?    @relation(fields: [projectId], references: [id])
-  predictionId String?     @map("prediction_id")
-  prediction   Prediction? @relation(fields: [predictionId], references: [id])
-  storageObjectId String?  @unique @map("storage_object_id")
-  storageObject   StorageObject? @relation("AssetOriginal", fields: [storageObjectId], references: [id])
-  thumbnailStorageObjectId String? @unique @map("thumbnail_storage_object_id")
-  thumbnailStorageObject StorageObject? @relation("AssetThumbnail", fields: [thumbnailStorageObjectId], references: [id])
-  url          String
-  type         String
-  thumbnailUrl String?     @map("thumbnail_url")
-  fileSize     Int?        @map("file_size")
-  isFavorite   Boolean     @default(false) @map("is_favorite")
-  createdAt    DateTime    @default(now()) @map("created_at")
+  id                       String          @id @default(uuid())
+  userId                   String?         @map("user_id")
+  user                     User?           @relation(fields: [userId], references: [id])
+  projectId                String?         @map("project_id")
+  project                  Project?        @relation(fields: [projectId], references: [id])
+  predictionId             String?         @map("prediction_id")
+  prediction               Prediction?     @relation(fields: [predictionId], references: [id])
+  storageObjectId          String?         @unique @map("storage_object_id")
+  storageObject            StorageObject?  @relation("AssetOriginal", fields: [storageObjectId], references: [id])
+  thumbnailStorageObjectId String?         @unique @map("thumbnail_storage_object_id")
+  thumbnailStorageObject   StorageObject?  @relation("AssetThumbnail", fields: [thumbnailStorageObjectId], references: [id])
+  url                      String
+  type                     String
+  thumbnailUrl             String?         @map("thumbnail_url")
+  fileSize                 Int?            @map("file_size")
+  isFavorite               Boolean         @default(false) @map("is_favorite")
+  brandKitAssets           BrandKitAsset[]
+  createdAt                DateTime        @default(now()) @map("created_at")
 
   @@index([userId, createdAt])
   @@index([projectId, createdAt])
@@ -104,19 +106,19 @@ model Asset {
 }
 
 model StorageObject {
-  id        String   @id @default(uuid())
-  userId    String?  @map("user_id")
-  user      User?    @relation(fields: [userId], references: [id])
-  provider  String   @default("remote_url")
-  bucket    String?
-  key       String?
-  url       String
-  mimeType  String?  @map("mime_type")
-  byteSize  Int?     @map("byte_size")
-  checksum  String?
-  createdAt DateTime @default(now()) @map("created_at")
-  asset     Asset? @relation("AssetOriginal")
-  thumbnailForAsset Asset? @relation("AssetThumbnail")
+  id                String   @id @default(uuid())
+  userId            String?  @map("user_id")
+  user              User?    @relation(fields: [userId], references: [id])
+  provider          String   @default("remote_url")
+  bucket            String?
+  key               String?
+  url               String
+  mimeType          String?  @map("mime_type")
+  byteSize          Int?     @map("byte_size")
+  checksum          String?
+  createdAt         DateTime @default(now()) @map("created_at")
+  asset             Asset?   @relation("AssetOriginal")
+  thumbnailForAsset Asset?   @relation("AssetThumbnail")
 
   @@index([userId, createdAt])
   @@index([provider, bucket, key])
@@ -175,14 +177,14 @@ model FreemiusEntitlement {
 }
 
 model BillingEvent {
-  id          String   @id @default(uuid())
-  userId      String?  @map("user_id")
-  user        User?    @relation(fields: [userId], references: [id])
-  provider    String   @default("freemius")
-  providerEventId String? @unique @map("provider_event_id")
-  eventType   String   @map("event_type")
-  payload     Json?
-  createdAt   DateTime @default(now()) @map("created_at")
+  id              String   @id @default(uuid())
+  userId          String?  @map("user_id")
+  user            User?    @relation(fields: [userId], references: [id])
+  provider        String   @default("freemius")
+  providerEventId String?  @unique @map("provider_event_id")
+  eventType       String   @map("event_type")
+  payload         Json?
+  createdAt       DateTime @default(now()) @map("created_at")
 
   @@index([userId, createdAt])
   @@index([eventType, createdAt])
@@ -190,36 +192,67 @@ model BillingEvent {
 }
 
 model BrandKit {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
-  user      User     @relation(fields: [userId], references: [id])
-  projectId String?  @map("project_id")
-  project   Project? @relation(fields: [projectId], references: [id])
-  name      String
-  colors    Json?
-  fonts     Json?
-  assets    Json?
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id                 String                 @id @default(uuid())
+  userId             String                 @map("user_id")
+  user               User                   @relation(fields: [userId], references: [id])
+  projectId          String?                @map("project_id")
+  project            Project?               @relation(fields: [projectId], references: [id])
+  name               String
+  kind               String                 @default("brand")
+  description        String?
+  promptRules        String?                @map("prompt_rules")
+  voice              String?
+  colors             Json?
+  fonts              Json?
+  assets             Json?
+  kitAssets          BrandKitAsset[]
+  projectAssignments ProjectKitAssignment[]
+  createdAt          DateTime               @default(now()) @map("created_at")
+  updatedAt          DateTime               @updatedAt @map("updated_at")
 
   @@index([userId, createdAt])
   @@map("brand_kits")
 }
 
+model BrandKitAsset {
+  brandKitId String   @map("brand_kit_id")
+  brandKit   BrandKit @relation(fields: [brandKitId], references: [id], onDelete: Cascade)
+  assetId    String   @map("asset_id")
+  asset      Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  role       String   @default("reference")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@id([brandKitId, assetId])
+  @@index([assetId])
+  @@map("brand_kit_assets")
+}
+
+model ProjectKitAssignment {
+  projectId  String   @map("project_id")
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  brandKitId String   @map("brand_kit_id")
+  brandKit   BrandKit @relation(fields: [brandKitId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@id([projectId, brandKitId])
+  @@index([brandKitId])
+  @@map("project_kit_assignments")
+}
+
 model ApiKey {
-  id         String    @id @default(uuid())
-  userId     String?   @map("user_id")
-  user       User?     @relation(fields: [userId], references: [id])
-  key        String    @unique
-  name       String?
-  prefix     String?
-  lastFour   String?   @map("last_four")
-  scopes     String[]  @default(["generation:write", "predictions:read"])
-  expiresAt  DateTime? @map("expires_at")
-  revokedAt  DateTime? @map("revoked_at")
-  revokedReason String? @map("revoked_reason")
-  lastUsedAt DateTime? @map("last_used_at")
-  createdAt  DateTime  @default(now()) @map("created_at")
+  id            String    @id @default(uuid())
+  userId        String?   @map("user_id")
+  user          User?     @relation(fields: [userId], references: [id])
+  key           String    @unique
+  name          String?
+  prefix        String?
+  lastFour      String?   @map("last_four")
+  scopes        String[]  @default(["generation:write", "predictions:read"])
+  expiresAt     DateTime? @map("expires_at")
+  revokedAt     DateTime? @map("revoked_at")
+  revokedReason String?   @map("revoked_reason")
+  lastUsedAt    DateTime? @map("last_used_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
 
   @@index([userId, revokedAt])
   @@index([expiresAt])

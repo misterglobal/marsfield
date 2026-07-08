@@ -75,6 +75,7 @@ export async function processThumbnailForAsset(assetId: string): Promise<boolean
     },
   });
   if (!asset?.userId || asset.thumbnailStorageObjectId) return false;
+  if (!['image', 'video'].includes(asset.type)) return false;
 
   // Direct image uploads use the original image as their preview and do not
   // need a separately stored derivative.

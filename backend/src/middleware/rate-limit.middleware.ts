@@ -2,15 +2,15 @@ import { NextFunction, Response } from 'express';
 import Redis from 'ioredis';
 import { AuthenticatedRequest } from './auth.middleware';
 
-type RateLimitBucket = 'generation' | 'upload';
+type RateLimitBucket = 'generation' | 'upload' | 'quote';
 
 const WINDOW_SECONDS = 60;
 const PLAN_LIMITS: Record<string, Record<RateLimitBucket, number>> = {
-  free: { generation: 3, upload: 10 },
-  starter: { generation: 10, upload: 30 },
-  creator: { generation: 20, upload: 45 },
-  pro: { generation: 40, upload: 60 },
-  studio: { generation: 80, upload: 120 },
+  free: { generation: 3, upload: 10, quote: 15 },
+  starter: { generation: 10, upload: 30, quote: 30 },
+  creator: { generation: 20, upload: 45, quote: 45 },
+  pro: { generation: 40, upload: 60, quote: 60 },
+  studio: { generation: 80, upload: 120, quote: 120 },
 };
 
 const redisUrl = process.env.REDIS_URL;

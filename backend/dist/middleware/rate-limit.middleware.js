@@ -9,11 +9,11 @@ const ioredis_1 = __importDefault(require("ioredis"));
 const WINDOW_SECONDS = 60;
 exports.WINDOW_SECONDS = WINDOW_SECONDS;
 const PLAN_LIMITS = {
-    free: { generation: 3, upload: 10 },
-    starter: { generation: 10, upload: 30 },
-    creator: { generation: 20, upload: 45 },
-    pro: { generation: 40, upload: 60 },
-    studio: { generation: 80, upload: 120 },
+    free: { generation: 3, upload: 10, quote: 15 },
+    starter: { generation: 10, upload: 30, quote: 30 },
+    creator: { generation: 20, upload: 45, quote: 45 },
+    pro: { generation: 40, upload: 60, quote: 60 },
+    studio: { generation: 80, upload: 120, quote: 120 },
 };
 exports.PLAN_LIMITS = PLAN_LIMITS;
 const redisUrl = process.env.REDIS_URL;

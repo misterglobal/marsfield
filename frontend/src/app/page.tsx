@@ -1,8 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '@/lib/api';
 import { useAuth } from './layout';
+import { CinematicControls } from '@/components/CinematicControls';
+import { buildCinematicPrompt, DEFAULT_CINEMATIC_SETTINGS } from '@/lib/cinematic';
+import { DynamicModelControls } from '@/components/DynamicModelControls';
+import { ControlKey, getModelDefinition, getModelsForWorkflow } from '@/lib/model-registry';
 
 interface ReferenceFile {
   name: string;
@@ -34,6 +38,18 @@ interface LibraryAsset {
   prediction?: { prompt?: string | null; model?: string; workflow?: string } | null;
 }
 
+const KLING_EDIT_PRESETS = [
+  { id: 'custom', label: 'Custom edit', prompt: '' },
+  { id: 'replace-person', label: 'Replace a person', prompt: 'Replace the person in <<<video_1>>> with the person from <<<image_1>>>, preserving the original motion, framing, lighting, and scene.' },
+  { id: 'replace-product', label: 'Replace a product or prop', prompt: 'Replace the primary product or prop in <<<video_1>>> with the object from <<<image_1>>>, preserving interactions, scale, reflections, camera motion, and scene continuity.' },
+  { id: 'change-clothing', label: 'Change clothing', prompt: 'Change the main person\'s clothing in <<<video_1>>> to match <<<image_1>>>, preserving identity, movement, lighting, and the original scene.' },
+  { id: 'replace-background', label: 'Replace the background', prompt: 'Replace the background in <<<video_1>>> with the environment shown in <<<image_1>>>, preserving the foreground subject, motion, perspective, lighting, and realistic edges.' },
+  { id: 'remove-object', label: 'Remove an object or person', prompt: 'Remove the specified unwanted object or person from <<<video_1>>> and naturally reconstruct the occluded background while preserving all other motion and sound.' },
+  { id: 'lighting-weather', label: 'Change lighting or weather', prompt: 'Transform the lighting and weather in <<<video_1>>> as described, preserving every subject, action, camera movement, and scene geometry.' },
+  { id: 'restyle', label: 'Change visual style', prompt: 'Restyle <<<video_1>>> according to the description while preserving subject identity, action, timing, composition, and camera movement.' },
+  { id: 'camera', label: 'Alternate camera treatment', prompt: 'Reinterpret <<<video_1>>> with the described camera treatment while preserving the subjects, action, timing, location, and continuity.' },
+] as const;
+
 export default function StudioPage() {
   const { user, token } = useAuth();
   const [workflow, setWorkflow] = useState('text-to-video');
@@ -50,7 +66,20 @@ export default function StudioPage() {
   const [aspectRatio, setAspectRatio] = useState('16:9');
   const [generateAudio, setGenerateAudio] = useState(true);
   const [klingMode, setKlingMode] = useState('pro');
+  const [klingEditPreset, setKlingEditPreset] = useState('custom');
   const [keepOriginalSound, setKeepOriginalSound] = useState(true);
+  const [upscaleFactor, setUpscaleFactor] = useState('2');
+  const [upscaleTargetMp, setUpscaleTargetMp] = useState(8);
+  const [upscaleQuality, setUpscaleQuality] = useState(90);
+  const [upscaleCreativity, setUpscaleCreativity] = useState(0);
+  const [enhanceDetails, setEnhanceDetails] = useState(false);
+  const [enhanceRealism, setEnhanceRealism] = useState(false);
+  const [enhanceTargetResolution, setEnhanceTargetResolution] = useState('1080p');
+  const [enhanceTargetFps, setEnhanceTargetFps] = useState(30);
+  const [extensionDuration, setExtensionDuration] = useState(6);
+  const [enhancementQuote, setEnhancementQuote] = useState<number | null>(null);
+  const [enhancementQuoteError, setEnhancementQuoteError] = useState('');
+  const [cinematicSettings, setCinematicSettings] = useState(DEFAULT_CINEMATIC_SETTINGS);
   const [referenceVideoDuration, setReferenceVideoDuration] = useState<number | null>(null);
   const [seed, setSeed] = useState('');
   const [variations, setVariations] = useState(1);
@@ -81,6 +110,7 @@ export default function StudioPage() {
   const [lastFrame, setLastFrame] = useState<ReferenceFile | null>(null);
   const [libraryAssets, setLibraryAssets] = useState<LibraryAsset[]>([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
+  const appliedAssetDeepLink = useRef('');
 
   const workflows = [
     { id: 'text-to-video', name: 'Text-to-Video', icon: '📝' },
@@ -88,46 +118,22 @@ export default function StudioPage() {
     { id: 'lip-sync', name: 'Lip Sync / Talking Avatar', icon: '🗣️' },
     { id: 'text-to-image', name: 'Image Generation', icon: '🎨' },
     { id: 'multimodal-video', name: 'Seedance Studio', icon: '🎞️' },
-    { id: 'character-replace', name: 'Character Replace', icon: '🎭' },
+    { id: 'video-edit', name: 'Kling Video Edit', icon: '🎭' },
+    { id: 'video-enhance', name: 'Video Enhance', icon: '✨' },
+    { id: 'image-upscale', name: 'Image Upscale', icon: '🔎' },
   ];
 
-  const modelsForWorkflow: Record<string, { id: string; name: string; speed: string }[]> = {
-    'text-to-video': [
-      { id: 'alibaba/happyhorse-1.1', name: 'Happy Horse 1.1', speed: 'Fast' },
-      { id: 'openai/sora-2', name: 'Sora 2', speed: 'High Quality' },
-      { id: 'kuaishou/kling-v2-1', name: 'Kling 2.1', speed: 'Balanced' },
-    ],
-    'image-to-video': [
-      { id: 'xai/grok-imagine-video-1.5', name: 'Grok Imagine Video 1.5', speed: 'Native Audio' },
-      { id: 'bytedance/wan-2.5-fast', name: 'Wan 2.5 Fast', speed: 'Ultrafast' },
-      { id: 'minimax/hailuo-live', name: 'Hailuo Live', speed: 'Cinematic' },
-    ],
-    'lip-sync': [
-      { id: 'bytedance/omni-human', name: 'OmniHuman V1', speed: 'High Fidelity' },
-      { id: 'bytedance/omni-human-1.5', name: 'OmniHuman 1.5', speed: 'Latest' },
-    ],
-    'text-to-image': [
-      { id: 'black-forest-labs/flux-schnell', name: 'Flux Schnell', speed: 'Speed' },
-      { id: 'stability-ai/stable-diffusion-3', name: 'Stable Diffusion 3', speed: 'Accurate' },
-      { id: 'google/nano-banana-2', name: 'Nano Banana 2', speed: 'Fast + Editing' },
-      { id: 'google/nano-banana-pro', name: 'Nano Banana Pro', speed: 'Premium Quality' },
-      { id: 'recraft-ai/recraft-v3', name: 'Recraft V3', speed: 'Design + Typography' },
-    ],
-    'multimodal-video': [
-      { id: 'bytedance/seedance-2.0', name: 'Seedance 2.0', speed: 'Best Quality' },
-      { id: 'bytedance/seedance-2.0-fast', name: 'Seedance 2.0 Fast', speed: 'Fast' },
-      { id: 'bytedance/seedance-2.0-mini', name: 'Seedance 2.0 Mini', speed: 'Lower Cost' },
-    ],
-    'character-replace': [
-      { id: 'kwaivgi/kling-v3-omni-video', name: 'Kling V3 Omni Video', speed: 'Video Editing' },
-    ],
-  };
+  const workflowModels = getModelsForWorkflow(workflow);
+  const activeModelDefinition = getModelDefinition(model);
 
   const isSeedance = workflow === 'multimodal-video';
-  const isCharacterReplace = workflow === 'character-replace';
-  const isNanoBanana = model === 'google/nano-banana-2' || model === 'google/nano-banana-pro';
-  const isRecraft = model === 'recraft-ai/recraft-v3';
-  const isGrokImagineVideo = model === 'xai/grok-imagine-video-1.5';
+  const isKlingEdit = workflow === 'video-edit';
+  const isVideoEnhance = workflow === 'video-enhance';
+  const isImageUpscale = workflow === 'image-upscale';
+  const isNanoBanana = activeModelDefinition?.family === 'nano-banana';
+  const isRecraft = activeModelDefinition?.family === 'recraft';
+  const isGrokImagineVideo = activeModelDefinition?.family === 'grok-video';
+  const supportsCinematicControls = activeModelDefinition?.supportsCinematic === true;
 
   const loadLibraryAssets = useCallback(async () => {
     if (!token) {
@@ -168,16 +174,80 @@ export default function StudioPage() {
     void api.getProject(projectId).then((project) => {
       const scene = project.scenes?.find((item: any) => item.id === sceneId);
       if (!scene) return;
+      const assignedKits = (project.kitAssignments || []).map((assignment: any) => assignment.brandKit);
+      const kitReferenceEntries = assignedKits
+        .flatMap((kit: any) => (kit.kitAssets || []).map(({ asset }: any) => ({ kit, asset })))
+        .filter(({ asset }: any) => asset.type === 'image' && asset.storageObjectId)
+        .filter(({ asset }: any, index: number, all: any[]) => all.findIndex((item) => item.asset.storageObjectId === asset.storageObjectId) === index)
+        .slice(0, 9);
+      const kitReferences: ReferenceFile[] = kitReferenceEntries
+        .map(({ kit, asset }: any) => ({ name: `${kit.name} reference`, id: asset.storageObjectId, url: asset.thumbnailUrl || asset.url, kind: 'image' as const }));
+      const kitGuidance = assignedKits.map((kit: any) => {
+        const details = [kit.description, kit.promptRules, kit.voice ? `Voice/tone: ${kit.voice}` : '', Array.isArray(kit.colors) && kit.colors.length ? `Colors: ${kit.colors.join(', ')}` : '', Array.isArray(kit.fonts) && kit.fonts.length ? `Fonts: ${kit.fonts.join(', ')}` : ''].filter(Boolean).join(' ');
+        const imageTags = kitReferenceEntries.map((entry: any, index: number) => entry.kit.id === kit.id ? `[Image${index + 1}]` : '').filter(Boolean);
+        return `${kit.kind === 'character' ? 'Character' : 'Brand'} ${kit.name}: ${details}${imageTags.length ? ` Use ${imageTags.join(' and ')} as identity references.` : ''}`;
+      }).filter(Boolean);
       setSelectedProjectId(projectId);
       setSelectedSceneId(sceneId);
-      setPrompt(scene.prompt || '');
+      setPrompt([scene.prompt || '', kitGuidance.length ? `Project continuity rules:\n${kitGuidance.join('\n')}` : ''].filter(Boolean).join('\n\n'));
       if (scene.durationSeconds) setDuration(scene.durationSeconds);
-      setWorkflow('text-to-video');
-      setModel('alibaba/happyhorse-1.1');
+      if (kitReferences.length) {
+        setReferenceImages(kitReferences);
+        setWorkflow('multimodal-video');
+        setModel('bytedance/seedance-2.0');
+      } else {
+        setWorkflow('text-to-video');
+        setModel('alibaba/happyhorse-1.1');
+      }
     }).catch((error) => setGenerationError(error.message || 'Failed to load storyboard scene'));
   }, [token]);
 
+  useEffect(() => {
+    if (!token || (!isVideoEnhance && !isImageUpscale)) return;
+    const sourceId = isVideoEnhance ? referenceVideos[0]?.id : imageStorageObjectId;
+    if (!sourceId) {
+      setEnhancementQuote(null);
+      setEnhancementQuoteError('');
+      return;
+    }
+    setEnhancementQuote(null);
+    setEnhancementQuoteError('');
+    const timer = window.setTimeout(() => {
+      const params = {
+        duration: model === 'xai/grok-imagine-video-extension' ? extensionDuration : undefined,
+        target_resolution: enhanceTargetResolution,
+        target_fps: enhanceTargetFps,
+        target: upscaleTargetMp,
+        upscale_factor: model === 'google/upscaler' ? `x${upscaleFactor}` : undefined,
+        scale_factor: Number(upscaleFactor),
+      };
+      void api.quoteGeneration({
+        workflow,
+        model,
+        video_storage_object_id: isVideoEnhance ? sourceId : undefined,
+        image_storage_object_id: isImageUpscale ? sourceId : undefined,
+        params,
+      }).then((quote) => setEnhancementQuote(quote.credits))
+        .catch((error) => setEnhancementQuoteError(error.message || 'Could not calculate exact credit quote'));
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [token, workflow, model, isVideoEnhance, isImageUpscale, referenceVideos, imageStorageObjectId, extensionDuration, enhanceTargetResolution, enhanceTargetFps, upscaleTargetMp, upscaleFactor]);
+
   const getBaseCredits = () => {
+    if (isImageUpscale) {
+      if (model === 'google/upscaler') return 1;
+      if (model === 'prunaai/p-image-upscale') return upscaleTargetMp <= 8 ? 1 : upscaleTargetMp <= 16 ? 1 : upscaleTargetMp <= 32 ? 2 : upscaleTargetMp <= 64 ? 2 : 4;
+      return upscaleFactor === '4' ? 12 : 4;
+    }
+    if (isVideoEnhance) {
+      const seconds = referenceVideoDuration || 5;
+      if (model === 'xai/grok-imagine-video-extension') return Math.ceil((seconds + extensionDuration) * 0.05 * 31.25);
+      if (model === 'topazlabs/video-upscale') {
+        const costPerSecond = enhanceTargetResolution === '4k' ? 0.0746 : enhanceTargetResolution === '720p' ? 0.0054 : 0.0186;
+        return Math.max(1, Math.ceil(seconds * costPerSecond * (enhanceTargetFps > 30 ? 2 : 1) * 31.25));
+      }
+      return Math.max(1, Math.ceil(seconds * (upscaleFactor === '4' ? 0.829 : upscaleFactor === '3' ? 0.6 : 0.4) * 31.25));
+    }
     if (model === 'google/nano-banana-pro') return imageResolution === '4K' ? 6 : 3;
     if (model === 'google/nano-banana-2') return imageResolution === '4K' ? 2 : 1;
     if (workflow === 'text-to-image') return 1;
@@ -197,6 +267,35 @@ export default function StudioPage() {
   const baseCredits = getBaseCredits();
   const variationUnitCredits = model === 'google/nano-banana-pro' ? baseCredits : Math.ceil(baseCredits * 0.75);
   const totalCredits = baseCredits + Math.max(0, variations - 1) * variationUnitCredits;
+  const displayedCredits = isVideoEnhance || isImageUpscale ? enhancementQuote : totalCredits;
+  const dynamicControlValues: Partial<Record<ControlKey, string | number | boolean>> = {
+    target_resolution: enhanceTargetResolution,
+    target_fps: enhanceTargetFps,
+    scale_factor: Number(upscaleFactor),
+    extension_duration: extensionDuration,
+    target_megapixels: upscaleTargetMp,
+    enhance_details: enhanceDetails,
+    enhance_realism: enhanceRealism,
+    upscale_factor: Number(upscaleFactor),
+    quality: upscaleQuality,
+    creativity: upscaleCreativity,
+    output_format: imageOutputFormat,
+  };
+  const updateDynamicControl = (key: ControlKey, value: string | number | boolean) => {
+    if (key === 'target_resolution') setEnhanceTargetResolution(String(value));
+    if (key === 'target_fps') setEnhanceTargetFps(Number(value));
+    if (key === 'scale_factor' || key === 'upscale_factor') setUpscaleFactor(String(value));
+    if (key === 'extension_duration') setExtensionDuration(Number(value));
+    if (key === 'target_megapixels') setUpscaleTargetMp(Number(value));
+    if (key === 'enhance_details') setEnhanceDetails(Boolean(value));
+    if (key === 'enhance_realism') setEnhanceRealism(Boolean(value));
+    if (key === 'quality') setUpscaleQuality(Number(value));
+    if (key === 'creativity') setUpscaleCreativity(Number(value));
+    if (key === 'output_format') setImageOutputFormat(String(value));
+  };
+  const applyModelControlDefaults = (modelId: string) => {
+    getModelDefinition(modelId)?.controls?.forEach((control) => updateDynamicControl(control.key, control.defaultValue));
+  };
 
   const uploadReferenceFiles = async (
     files: FileList | null,
@@ -280,9 +379,9 @@ export default function StudioPage() {
   const handleCharacterImageUpload = async (files: FileList | null) => {
     try {
       setGenerationError('');
-      setReferenceImages(await uploadReferenceFiles(files, 1, 'image'));
+      setReferenceImages(await uploadReferenceFiles(files, 4, 'image'));
     } catch (error) {
-      setGenerationError(error instanceof Error ? error.message : 'Character image upload failed');
+      setGenerationError(error instanceof Error ? error.message : 'Edit reference upload failed');
     }
   };
 
@@ -301,6 +400,25 @@ export default function StudioPage() {
       setReferenceVideos([]);
       setReferenceVideoDuration(null);
       setGenerationError(error instanceof Error ? error.message : 'Reference video upload failed');
+    }
+  };
+
+  const handleEnhanceVideoUpload = async (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file) return;
+    try {
+      setGenerationError('');
+      const measured = await readVideoDuration(file);
+      if (model === 'xai/grok-imagine-video-extension' && (measured < 2 || measured > 15.05)) {
+        throw new Error(`Grok source video must be between 2 and 15 seconds. This video is ${measured.toFixed(1)} seconds.`);
+      }
+      if (measured > 120) throw new Error('Video enhancement currently supports source videos up to 120 seconds.');
+      setReferenceVideoDuration(measured);
+      setReferenceVideos(await uploadReferenceFiles(files, 1, 'video'));
+    } catch (error) {
+      setReferenceVideos([]);
+      setReferenceVideoDuration(null);
+      setGenerationError(error instanceof Error ? error.message : 'Enhancement video upload failed');
     }
   };
 
@@ -365,11 +483,11 @@ export default function StudioPage() {
   };
 
   const supportedLibraryTypes: Array<'image' | 'video' | 'audio'> =
-    workflow === 'image-to-video' || (workflow === 'text-to-image' && isNanoBanana)
+    workflow === 'image-to-video' || isImageUpscale || (workflow === 'text-to-image' && isNanoBanana)
       ? ['image']
       : workflow === 'lip-sync'
         ? ['image', 'audio']
-        : isCharacterReplace
+        : isKlingEdit || isVideoEnhance
           ? ['image', 'video']
           : isSeedance
             ? ['image', 'video', 'audio']
@@ -381,6 +499,7 @@ export default function StudioPage() {
   const isLibraryAssetSelected = (asset: LibraryAsset) => {
     const storageId = asset.storageObjectId || '';
     if (workflow === 'image-to-video') return imageStorageObjectId === storageId;
+    if (isImageUpscale) return imageStorageObjectId === storageId;
     if (workflow === 'lip-sync') return asset.type === 'image' ? imageStorageObjectId === storageId : audioStorageObjectId === storageId;
     if (asset.type === 'image') return referenceImages.some((item) => item.id === storageId);
     if (asset.type === 'video') return referenceVideos.some((item) => item.id === storageId);
@@ -396,7 +515,7 @@ export default function StudioPage() {
       name: asset.prediction?.prompt?.slice(0, 48) || `Library ${asset.type}`,
     };
 
-    if (workflow === 'image-to-video') {
+    if (workflow === 'image-to-video' || isImageUpscale) {
       setImageFile(null);
       setImagePreview(asset.thumbnailUrl || asset.url);
       setImageStorageObjectId(asset.storageObjectId);
@@ -414,12 +533,20 @@ export default function StudioPage() {
       }
       return;
     }
-    if (isCharacterReplace) {
-      if (asset.type === 'image') setReferenceImages([reference]);
+    if (isKlingEdit) {
+      if (asset.type === 'image') {
+        const exists = referenceImages.some((item) => item.id === reference.id);
+        setReferenceImages(exists ? referenceImages.filter((item) => item.id !== reference.id) : [...referenceImages, reference].slice(0, 4));
+      }
       if (asset.type === 'video') {
         setReferenceVideos([reference]);
         setReferenceVideoDuration(null);
       }
+      return;
+    }
+    if (isVideoEnhance && asset.type === 'video') {
+      setReferenceVideos([reference]);
+      setReferenceVideoDuration(null);
       return;
     }
 
@@ -435,6 +562,54 @@ export default function StudioPage() {
     if (asset.type === 'video') toggleReference(referenceVideos, setReferenceVideos, 3);
     if (asset.type === 'audio') toggleReference(referenceAudio, setReferenceAudio, 3);
   };
+
+  useEffect(() => {
+    if (!token || !libraryAssets.length) return;
+    const query = new URLSearchParams(window.location.search);
+    const requestedWorkflow = query.get('workflow');
+    const assetId = query.get('asset_id');
+    if (!requestedWorkflow || !assetId) return;
+    const signature = `${requestedWorkflow}:${assetId}:${query.get('model') || ''}`;
+    if (appliedAssetDeepLink.current === signature) return;
+    const asset = libraryAssets.find((item) => item.id === assetId && item.storageObjectId);
+    const models = getModelsForWorkflow(requestedWorkflow);
+    if (!asset || !models.length) return;
+    const requestedModel = query.get('model');
+    const nextModel = models.find((item) => item.id === requestedModel) || models[0];
+    const reference: ReferenceFile = {
+      id: asset.storageObjectId!, url: asset.url, kind: asset.type,
+      name: asset.prediction?.prompt?.slice(0, 48) || `Library ${asset.type}`,
+    };
+
+    setWorkflow(requestedWorkflow);
+    setModel(nextModel.id);
+    applyModelControlDefaults(nextModel.id);
+    if (requestedWorkflow === 'image-to-video' || requestedWorkflow === 'image-upscale') {
+      if (asset.type !== 'image') return;
+      setImageFile(null);
+      setImagePreview(asset.thumbnailUrl || asset.url);
+      setImageStorageObjectId(asset.storageObjectId!);
+    } else if (requestedWorkflow === 'video-edit') {
+      if (asset.type === 'image') setReferenceImages([reference]);
+      if (asset.type === 'video') setReferenceVideos([reference]);
+    } else if (requestedWorkflow === 'video-enhance' && asset.type === 'video') {
+      setReferenceVideos([reference]);
+      setReferenceVideoDuration(null);
+      if (nextModel.id === 'xai/grok-imagine-video-extension') setPrompt('Continue the scene naturally from the final frame.');
+    } else if (requestedWorkflow === 'text-to-image' && asset.type === 'image') {
+      setReferenceImages([reference]);
+    } else if (requestedWorkflow === 'lip-sync') {
+      if (asset.type === 'image') {
+        setImagePreview(asset.thumbnailUrl || asset.url);
+        setImageStorageObjectId(asset.storageObjectId!);
+      }
+      if (asset.type === 'audio') {
+        setAudioFileName(reference.name);
+        setAudioStorageObjectId(asset.storageObjectId!);
+      }
+    }
+    appliedAssetDeepLink.current = signature;
+  }, [token, libraryAssets]);
 
   const pollPrediction = async (id: string, abortSignal: AbortController, variationIndex = 0) => {
     let attempts = 0;
@@ -498,7 +673,7 @@ export default function StudioPage() {
     }
     
     // Validate based on workflow
-    if (workflow === 'text-to-video' || workflow === 'text-to-image' || workflow === 'multimodal-video' || workflow === 'character-replace') {
+    if (workflow === 'text-to-video' || workflow === 'text-to-image' || workflow === 'multimodal-video' || workflow === 'video-edit') {
       if (!prompt) {
         setGenerationError('Please enter a prompt.');
         return;
@@ -517,9 +692,25 @@ export default function StudioPage() {
         setGenerationError('Please upload both image and audio files.');
         return;
       }
+    } else if (isImageUpscale && !imageStorageObjectId) {
+      setGenerationError('Please upload or select an image to upscale.');
+      return;
+    } else if (isVideoEnhance) {
+      if (!referenceVideos[0]) {
+        setGenerationError('Please upload or select a source video.');
+        return;
+      }
+      if (model === 'xai/grok-imagine-video-extension' && !prompt.trim()) {
+        setGenerationError('Please describe what should happen next in the video.');
+        return;
+      }
     }
-    if (workflow === 'character-replace' && (!referenceImages[0] || !referenceVideos[0])) {
-      setGenerationError('Please upload one character image and a 3–10 second reference video.');
+    if (workflow === 'video-edit' && !referenceVideos[0]) {
+      setGenerationError('Please upload a 3–10 second source video. Reference images are optional unless your prompt uses one.');
+      return;
+    }
+    if ((isVideoEnhance || isImageUpscale) && enhancementQuote === null) {
+      setGenerationError(enhancementQuoteError || 'Please wait for the exact credit quote before submitting.');
       return;
     }
 
@@ -539,10 +730,13 @@ export default function StudioPage() {
     setVariationResults([]);
 
     try {
+      const submittedPrompt = supportsCinematicControls
+        ? buildCinematicPrompt(prompt, cinematicSettings)
+        : prompt;
       const generatePayload: any = {
         workflow,
         model,
-        prompt,
+        prompt: submittedPrompt,
         project_id: selectedProjectId || undefined,
         storyboard_scene_id: selectedSceneId || undefined,
         params: {
@@ -571,8 +765,8 @@ export default function StudioPage() {
         generatePayload.params.reference_audio_ids = referenceAudio.map((file) => file.id);
         generatePayload.params.first_frame_image_id = firstFrame?.id;
         generatePayload.params.last_frame_image_id = lastFrame?.id;
-      } else if (isCharacterReplace) {
-        generatePayload.params.reference_image_ids = referenceImages.slice(0, 1).map((file) => file.id);
+      } else if (isKlingEdit) {
+        generatePayload.params.reference_image_ids = referenceImages.slice(0, 4).map((file) => file.id);
         generatePayload.params.reference_video_id = referenceVideos[0]?.id;
         generatePayload.params.mode = klingMode;
         generatePayload.params.keep_original_sound = keepOriginalSound;
@@ -583,6 +777,29 @@ export default function StudioPage() {
       // Add file data if needed
       if (imageStorageObjectId && workflow === 'image-to-video') {
         generatePayload.image_storage_object_id = imageStorageObjectId;
+      } else if (isImageUpscale && imageStorageObjectId) {
+        generatePayload.image_storage_object_id = imageStorageObjectId;
+        generatePayload.params = {
+          ...generatePayload.params,
+          target: upscaleTargetMp,
+          upscale_factor: model === 'google/upscaler' ? `x${upscaleFactor}` : undefined,
+          scale_factor: model === 'philz1337x/clarity-pro-upscaler' ? Number(upscaleFactor) : undefined,
+          compression_quality: upscaleQuality,
+          output_quality: upscaleQuality,
+          output_format: imageOutputFormat,
+          creativity: upscaleCreativity,
+          enhance_details: enhanceDetails,
+          enhance_realism: enhanceRealism,
+        };
+      } else if (isVideoEnhance && referenceVideos[0]) {
+        generatePayload.video_storage_object_id = referenceVideos[0].id;
+        generatePayload.params = {
+          ...generatePayload.params,
+          duration: model === 'xai/grok-imagine-video-extension' ? extensionDuration : undefined,
+          target_resolution: enhanceTargetResolution,
+          target_fps: enhanceTargetFps,
+          scale_factor: Number(upscaleFactor),
+        };
       } else if (workflow === 'lip-sync' && imageStorageObjectId && audioStorageObjectId) {
         generatePayload.image_storage_object_id = imageStorageObjectId;
         generatePayload.audio_storage_object_id = audioStorageObjectId;
@@ -652,19 +869,35 @@ export default function StudioPage() {
                 key={wf.id}
                 onClick={() => {
                   setWorkflow(wf.id);
-                  setModel(modelsForWorkflow[wf.id][0].id);
+                  const firstModel = getModelsForWorkflow(wf.id)[0];
+                  setModel(firstModel.id);
+                  applyModelControlDefaults(firstModel.id);
                   setDuration(wf.id === 'multimodal-video' ? -1 : 5);
                   setResolution('720p');
                   setImageResolution('1K');
                   setImageOutputFormat('jpg');
                   setRecraftStyle('any');
                   setAspectRatio(wf.id === 'multimodal-video' ? 'adaptive' : wf.id === 'image-to-video' ? 'auto' : '16:9');
-                  if (wf.id === 'character-replace') {
-                    setPrompt('Replace the person in <<<video_1>>> with the person from <<<image_1>>>, preserving the original motion, framing, lighting, and scene.');
+                  if (wf.id === 'video-edit') {
+                    setKlingEditPreset('custom');
+                    setPrompt('');
                     setGenerateAudio(false);
                     setReferenceImages([]);
                     setReferenceVideos([]);
                     setReferenceVideoDuration(null);
+                  }
+                  if (wf.id === 'video-enhance') {
+                    setVariations(1);
+                    setPrompt('');
+                    setReferenceVideos([]);
+                    setReferenceVideoDuration(null);
+                  }
+                  if (wf.id === 'image-upscale') {
+                    setVariations(1);
+                    setPrompt('');
+                    setImageStorageObjectId('');
+                    setImagePreview('');
+                    setImageFile(null);
                   }
                 }}
                 className={`btn ${isActive ? 'btn-primary' : 'btn-secondary'}`}
@@ -729,10 +962,10 @@ export default function StudioPage() {
 
         {/* Prompt Input & Assist */}
         <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-          {workflow === 'image-to-video' && (
+          {(workflow === 'image-to-video' || isImageUpscale) && (
             <>
               <div className="prompt-heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 600 }}>1. Upload reference image</h3>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 600 }}>1. {isImageUpscale ? 'Choose an image to upscale' : 'Upload reference image'}</h3>
               </div>
               <div
                 style={{
@@ -845,29 +1078,65 @@ export default function StudioPage() {
             </>
           )}
 
-          {isCharacterReplace && (
+          {isKlingEdit && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.35rem' }}>1. Upload the replacement character</h3>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.35rem' }}>1. Choose an edit</h3>
                 <p style={{ color: 'var(--foreground-muted)', fontSize: '0.82rem', margin: 0 }}>
-                  Use one clear JPG or PNG showing the person who should replace the character in the source video.
+                  Start from a safe prompt template, then customize the exact subject, object, setting, lighting, weather, or style you want changed.
+                </p>
+              </div>
+              <select
+                className="form-select"
+                value={klingEditPreset}
+                onChange={(event) => {
+                  const preset = KLING_EDIT_PRESETS.find((item) => item.id === event.target.value);
+                  setKlingEditPreset(event.target.value);
+                  if (preset) setPrompt(preset.prompt);
+                }}
+              >
+                {KLING_EDIT_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+              </select>
+
+              <div>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.35rem' }}>2. Add reference images (optional)</h3>
+                <p style={{ color: 'var(--foreground-muted)', fontSize: '0.82rem', margin: 0 }}>
+                  Add up to four references for people, products, clothing, backgrounds, or visual style. Refer to them as &lt;&lt;&lt;image_1&gt;&gt;&gt; through &lt;&lt;&lt;image_4&gt;&gt;&gt;.
                 </p>
               </div>
               <label style={{ border: '2px dashed var(--panel-border)', borderRadius: '12px', padding: '1rem', cursor: 'pointer', background: referenceImages.length ? 'rgba(139, 92, 246, 0.08)' : 'rgba(255, 255, 255, 0.02)' }}>
-                <input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void handleCharacterImageUpload(event.target.files)} style={{ display: 'none' }} />
-                <strong style={{ display: 'block' }}>{referenceImages[0]?.name || 'Choose character image'}</strong>
-                <span style={{ color: 'var(--foreground-muted)', fontSize: '0.75rem' }}>Maximum 10 MB</span>
+                <input type="file" multiple accept="image/jpeg,image/png,image/webp" onChange={(event) => void handleCharacterImageUpload(event.target.files)} style={{ display: 'none' }} />
+                <strong style={{ display: 'block' }}>{referenceImages.length ? referenceImages.map((image) => image.name).join(', ') : 'Choose up to four reference images'}</strong>
+                <span style={{ color: 'var(--foreground-muted)', fontSize: '0.75rem' }}>Maximum 10 MB each</span>
               </label>
 
               <div>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.35rem' }}>2. Upload the source video</h3>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.35rem' }}>3. Upload the source video</h3>
                 <p style={{ color: 'var(--foreground-muted)', fontSize: '0.82rem', margin: 0 }}>
                   The video must be 3–10 seconds long. Longer videos are rejected before generation and no credits are charged.
                 </p>
               </div>
               <label style={{ border: '2px dashed var(--panel-border)', borderRadius: '12px', padding: '1rem', cursor: 'pointer', background: referenceVideos.length ? 'rgba(139, 92, 246, 0.08)' : 'rgba(255, 255, 255, 0.02)' }}>
-                <input type="file" accept="video/mp4,video/quicktime,video/webm" onChange={(event) => void handleCharacterVideoUpload(event.target.files)} style={{ display: 'none' }} />
+                <input type="file" accept="video/mp4,video/quicktime" onChange={(event) => void handleCharacterVideoUpload(event.target.files)} style={{ display: 'none' }} />
                 <strong style={{ display: 'block' }}>{referenceVideos[0]?.name || 'Choose 3–10 second video'}</strong>
+                <span style={{ color: 'var(--foreground-muted)', fontSize: '0.75rem' }}>
+                  {referenceVideoDuration ? `${referenceVideoDuration.toFixed(1)} seconds` : 'Maximum 200 MB'}
+                </span>
+              </label>
+            </div>
+          )}
+
+          {isVideoEnhance && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.35rem' }}>1. Choose a source video</h3>
+                <p style={{ color: 'var(--foreground-muted)', fontSize: '0.82rem', margin: 0 }}>
+                  Grok accepts 2–15 second MP4 files. Upscaling models accept longer videos, with credits based on actual duration, resolution, and frame rate.
+                </p>
+              </div>
+              <label style={{ border: '2px dashed var(--panel-border)', borderRadius: '12px', padding: '1rem', cursor: 'pointer', background: referenceVideos.length ? 'rgba(139, 92, 246, 0.08)' : 'rgba(255, 255, 255, 0.02)' }}>
+                <input type="file" accept={model === 'xai/grok-imagine-video-extension' ? 'video/mp4' : 'video/mp4,video/quicktime,video/webm'} onChange={(event) => void handleEnhanceVideoUpload(event.target.files)} style={{ display: 'none' }} />
+                <strong style={{ display: 'block' }}>{referenceVideos[0]?.name || 'Choose source video'}</strong>
                 <span style={{ color: 'var(--foreground-muted)', fontSize: '0.75rem' }}>
                   {referenceVideoDuration ? `${referenceVideoDuration.toFixed(1)} seconds` : 'Maximum 200 MB'}
                 </span>
@@ -950,10 +1219,10 @@ export default function StudioPage() {
             </div>
           )}
 
-          {(workflow === 'text-to-video' || workflow === 'text-to-image' || isSeedance || isCharacterReplace || isGrokImagineVideo) && (
+          {(workflow === 'text-to-video' || workflow === 'text-to-image' || isSeedance || isKlingEdit || isGrokImagineVideo || (isVideoEnhance && model === 'xai/grok-imagine-video-extension')) && (
             <>
               <div className="prompt-heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 600 }}>{isSeedance || isGrokImagineVideo ? '2.' : isCharacterReplace ? '3.' : '1.'} Describe your creative vision</h3>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 600 }}>{isSeedance || isGrokImagineVideo || isVideoEnhance ? '2.' : isKlingEdit ? '4.' : '1.'} Describe your creative vision</h3>
                 <button
                   onClick={handleEnhancePrompt}
                   className="btn btn-secondary"
@@ -1022,7 +1291,9 @@ export default function StudioPage() {
                   {generationStatus === 'succeeded'
                     ? 'Your asset has been added to the library.'
                     : token
-                      ? `This request will consume ${totalCredits} credit${totalCredits === 1 ? '' : 's'}. Variations cost extra.`
+                      ? displayedCredits === null
+                        ? 'Inspecting the source to calculate an exact credit charge…'
+                        : `This request will consume ${displayedCredits} credit${displayedCredits === 1 ? '' : 's'}.${isVideoEnhance || isImageUpscale ? ' Exact price verified from the source media.' : ' Variations cost extra.'}`
                       : 'Sign in to start generating.'}
                 </p>
               </div>
@@ -1035,7 +1306,10 @@ export default function StudioPage() {
                   (workflow === 'text-to-image' && !prompt) ||
                   (isGrokImagineVideo && !prompt) ||
                   (workflow === 'multimodal-video' && !prompt) ||
-                  (workflow === 'character-replace' && (!prompt || !referenceImages[0] || !referenceVideos[0])) ||
+                  (workflow === 'video-edit' && (!prompt || !referenceVideos[0])) ||
+                  (workflow === 'video-enhance' && (!referenceVideos[0] || (model === 'xai/grok-imagine-video-extension' && !prompt))) ||
+                  (workflow === 'image-upscale' && !imageStorageObjectId) ||
+                  ((workflow === 'video-enhance' || workflow === 'image-upscale') && enhancementQuote === null) ||
                   (workflow === 'image-to-video' && !imageStorageObjectId) ||
                   (workflow === 'lip-sync' && (!imageStorageObjectId || !audioStorageObjectId)) || uploadProgress !== null
                 }
@@ -1044,7 +1318,10 @@ export default function StudioPage() {
                   (workflow === 'text-to-image' && !prompt) ||
                   (isGrokImagineVideo && !prompt) ||
                   (workflow === 'multimodal-video' && !prompt) ||
-                  (workflow === 'character-replace' && (!prompt || !referenceImages[0] || !referenceVideos[0])) ||
+                  (workflow === 'video-edit' && (!prompt || !referenceVideos[0])) ||
+                  (workflow === 'video-enhance' && (!referenceVideos[0] || (model === 'xai/grok-imagine-video-extension' && !prompt))) ||
+                  (workflow === 'image-upscale' && !imageStorageObjectId) ||
+                  ((workflow === 'video-enhance' || workflow === 'image-upscale') && enhancementQuote === null) ||
                   (workflow === 'image-to-video' && !imageStorageObjectId) ||
                   (workflow === 'lip-sync' && (!imageStorageObjectId || !audioStorageObjectId)) || uploadProgress !== null ? 0.5 : 1 }}
               >
@@ -1177,6 +1454,7 @@ export default function StudioPage() {
             onChange={(e) => {
               const nextModel = e.target.value;
               setModel(nextModel);
+              applyModelControlDefaults(nextModel);
               if (nextModel === 'xai/grok-imagine-video-1.5') {
                 setResolution('720p');
                 setAspectRatio('auto');
@@ -1190,7 +1468,7 @@ export default function StudioPage() {
               }
             }}
           >
-            {modelsForWorkflow[workflow]?.map((m) => (
+            {workflowModels.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name} ({m.speed})
               </option>
@@ -1198,7 +1476,9 @@ export default function StudioPage() {
           </select>
         </div>
 
-        {isCharacterReplace && (
+        <DynamicModelControls model={activeModelDefinition} values={dynamicControlValues} onChange={updateDynamicControl} />
+
+        {isKlingEdit && (
           <>
             <div>
               <label className="form-label">Quality</label>
@@ -1282,7 +1562,11 @@ export default function StudioPage() {
           </>
         )}
 
-        <div>
+        {supportsCinematicControls && (
+          <CinematicControls value={cinematicSettings} onChange={setCinematicSettings} />
+        )}
+
+        {!isVideoEnhance && !isImageUpscale ? <div>
           <label className="form-label">Variations</label>
           <select className="form-select" value={variations} onChange={(e) => setVariations(Number(e.target.value))}>
             {[1, 2, 3, 4].map((count) => (
@@ -1294,10 +1578,17 @@ export default function StudioPage() {
           <p style={{ color: 'var(--foreground-muted)', fontSize: '0.75rem', marginTop: '0.5rem', marginBottom: 0 }}>
             Credit estimate: {baseCredits} base + {Math.max(0, variations - 1)} variation{variations === 2 ? '' : 's'} = {totalCredits}
           </p>
-        </div>
+        </div> : (
+          <div style={{ padding: '0.8rem', border: '1px solid var(--panel-border)', borderRadius: '10px' }}>
+            <strong>{enhancementQuote === null ? 'Inspecting source…' : `Exact charge: ${enhancementQuote} credits`}</strong>
+            <p style={{ color: 'var(--foreground-muted)', fontSize: '0.75rem', margin: '0.35rem 0 0' }}>
+              {enhancementQuoteError || 'Calculated server-side from the inspected source duration, dimensions, FPS, and selected output size before provider submission.'}
+            </p>
+          </div>
+        )}
 
         {/* Duration Slider */}
-        {workflow !== 'text-to-image' && !isSeedance && !isCharacterReplace && (
+        {workflow !== 'text-to-image' && !isSeedance && !isKlingEdit && !isVideoEnhance && !isImageUpscale && (
           <div className="slider-container">
             <div className="slider-header">
               <span>Duration</span>
@@ -1354,7 +1645,7 @@ export default function StudioPage() {
         )}
 
         {/* FPS Slider */}
-        {workflow !== 'text-to-image' && !isSeedance && !isCharacterReplace && (
+        {workflow !== 'text-to-image' && !isSeedance && !isKlingEdit && !isVideoEnhance && !isImageUpscale && (
           <div className="slider-container">
             <div className="slider-header">
               <span>Frame Rate</span>
@@ -1365,7 +1656,7 @@ export default function StudioPage() {
         )}
 
         {/* Camera Moves */}
-        {workflow !== 'text-to-image' && !isSeedance && !isCharacterReplace && (
+        {workflow !== 'text-to-image' && !isSeedance && !isKlingEdit && !isVideoEnhance && !isImageUpscale && (
           <div>
             <label className="form-label">Camera Motion</label>
             <select className="form-select" value={cameraMove} onChange={(e) => setCameraMove(e.target.value)}>
