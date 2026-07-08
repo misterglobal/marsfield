@@ -28,6 +28,47 @@ function parseVariationCount(params?: Record<string, unknown>): number {
 }
 
 function getBaseCredits(input: GenerationBillingInput): number {
+  if (input.workflow === 'image-upscale') {
+    if (input.model === 'google/upscaler') return 1;
+    const outputMegapixels = Number(input.params?.output_megapixels || 0);
+    if (!Number.isFinite(outputMegapixels) || outputMegapixels <= 0) throw new Error('Could not calculate upscale output size');
+    if (input.model === 'prunaai/p-image-upscale') {
+      const estimatedCost = outputMegapixels <= 4 ? 0.005
+        : outputMegapixels <= 8 ? 0.01
+          : outputMegapixels <= 16 ? 0.02
+            : outputMegapixels <= 32 ? 0.04
+              : outputMegapixels <= 64 ? 0.06 : 0.12;
+      return Math.max(1, Math.ceil(estimatedCost * 31.25));
+    }
+    if (input.model === 'philz1337x/clarity-pro-upscaler') {
+      return Math.max(1, Math.ceil(outputMegapixels * 0.03 * 31.25));
+    }
+  }
+
+  if (input.workflow === 'video-enhance') {
+    const duration = Number(input.params?.duration || 0);
+    if (!Number.isFinite(duration) || duration <= 0) throw new Error('Could not calculate enhancement duration');
+    if (input.model === 'xai/grok-imagine-video-extension') {
+      const outputDuration = Number(input.params?.output_duration || duration);
+      return Math.max(1, Math.ceil(outputDuration * 0.05 * 31.25));
+    }
+    if (input.model === 'topazlabs/video-upscale') {
+      const resolution = input.params?.target_resolution || '1080p';
+      const fps = Number(input.params?.target_fps || 30);
+      const costPerSecond30 = resolution === '4k' ? 0.0746 : resolution === '720p' ? 0.0054 : 0.0186;
+      const estimatedCost = duration * costPerSecond30 * (fps > 30 ? 2 : 1);
+      return Math.max(1, Math.ceil(estimatedCost * 31.25));
+    }
+    if (input.model === 'philz1337x/crystal-video-upscaler') {
+      const inputMegapixels = Number(input.params?.input_megapixels || 0);
+      const scaleFactor = Number(input.params?.scale_factor || 2);
+      const inputFps = Number(input.params?.input_fps || 30);
+      const outputMegapixels = Math.min(8.2944, inputMegapixels * scaleFactor * scaleFactor);
+      const estimatedCost = duration * outputMegapixels * (inputFps > 30 ? 0.2 : 0.1);
+      return Math.max(1, Math.ceil(estimatedCost * 31.25));
+    }
+  }
+
   if (input.model === 'google/nano-banana-pro') {
     return input.params?.resolution === '4K' ? 6 : 3;
   }

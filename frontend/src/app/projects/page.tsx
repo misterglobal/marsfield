@@ -42,6 +42,14 @@ export default function ProjectsPage() {
   const [description, setDescription] = useState('');
   const [sceneTitle, setSceneTitle] = useState('');
   const [scenePrompt, setScenePrompt] = useState('');
+  const [editingSceneIndex, setEditingSceneIndex] = useState<number | null>(null);
+  const [script, setScript] = useState('');
+  const [sceneCount, setSceneCount] = useState(6);
+  const [totalDuration, setTotalDuration] = useState(30);
+  const [visualStyle, setVisualStyle] = useState('cinematic realism');
+  const [aspectRatio, setAspectRatio] = useState('16:9');
+  const [continuity, setContinuity] = useState('');
+  const [planning, setPlanning] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -94,9 +102,9 @@ export default function ProjectsPage() {
     event.preventDefault();
     if (!selectedProject || !scenePrompt.trim()) return;
 
-    const nextIndex = selectedProject.scenes.length
+    const nextIndex = editingSceneIndex ?? (selectedProject.scenes.length
       ? Math.max(...selectedProject.scenes.map((scene) => scene.index)) + 1
-      : 0;
+      : 0);
 
     try {
       await api.saveStoryboardScene(selectedProject.id, {
@@ -106,11 +114,45 @@ export default function ProjectsPage() {
       });
       setSceneTitle('');
       setScenePrompt('');
+      setEditingSceneIndex(null);
       setSelectedProject(await api.getProject(selectedProject.id));
       await loadProjects();
     } catch (err: any) {
       setError(err.message || 'Failed to save storyboard scene');
     }
+  };
+
+  const createPlan = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedProject || script.trim().length < 20) return;
+    const replaceExisting = selectedProject.scenes.length > 0;
+    if (replaceExisting && !window.confirm('Replace the existing storyboard scenes with this new script plan? Existing scene generations remain in your account, but their storyboard links will be removed.')) return;
+
+    setPlanning(true);
+    setError('');
+    try {
+      await api.createStoryboardPlan(selectedProject.id, {
+        script,
+        scene_count: sceneCount,
+        total_duration_seconds: totalDuration,
+        visual_style: visualStyle,
+        aspect_ratio: aspectRatio,
+        continuity,
+        replace_existing: replaceExisting,
+      });
+      setSelectedProject(await api.getProject(selectedProject.id));
+      await loadProjects();
+    } catch (err: any) {
+      setError(err.message || 'Failed to create storyboard plan');
+    } finally {
+      setPlanning(false);
+    }
+  };
+
+  const editScene = (scene: ProjectDetail['scenes'][number]) => {
+    setEditingSceneIndex(scene.index);
+    setSceneTitle(scene.title || '');
+    setScenePrompt(scene.prompt || '');
   };
 
   if (!token) {
@@ -172,11 +214,64 @@ export default function ProjectsPage() {
               </div>
             </div>
 
+            <form className="glass-card" onSubmit={createPlan} style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1rem' }}>Script-to-film planner</h3>
+                <p style={{ margin: '0.35rem 0 0', color: 'var(--foreground-muted)', fontSize: '0.82rem' }}>
+                  Turn a script into an editable shot plan. Planning is free; credits are only charged when you generate a scene.
+                </p>
+              </div>
+              <textarea
+                className="form-textarea"
+                rows={9}
+                maxLength={20000}
+                placeholder="Paste a screenplay, narration, ad concept, or scene outline..."
+                value={script}
+                onChange={(event) => setScript(event.target.value)}
+              />
+              <div className="storyboard-plan-controls" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '0.75rem' }}>
+                <label style={{ fontSize: '0.78rem', color: 'var(--foreground-muted)' }}>
+                  Scenes
+                  <input className="form-input" type="number" min={2} max={20} value={sceneCount} onChange={(event) => setSceneCount(Number(event.target.value))} style={{ marginTop: '0.35rem' }} />
+                </label>
+                <label style={{ fontSize: '0.78rem', color: 'var(--foreground-muted)' }}>
+                  Total seconds
+                  <input className="form-input" type="number" min={sceneCount} max={300} value={totalDuration} onChange={(event) => setTotalDuration(Number(event.target.value))} style={{ marginTop: '0.35rem' }} />
+                </label>
+                <label style={{ fontSize: '0.78rem', color: 'var(--foreground-muted)' }}>
+                  Frame
+                  <select className="form-select" value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value)} style={{ marginTop: '0.35rem' }}>
+                    <option value="16:9">16:9 landscape</option>
+                    <option value="9:16">9:16 vertical</option>
+                    <option value="1:1">1:1 square</option>
+                    <option value="21:9">21:9 cinematic</option>
+                  </select>
+                </label>
+                <label style={{ fontSize: '0.78rem', color: 'var(--foreground-muted)' }}>
+                  Visual style
+                  <select className="form-select" value={visualStyle} onChange={(event) => setVisualStyle(event.target.value)} style={{ marginTop: '0.35rem' }}>
+                    <option value="cinematic realism">Cinematic realism</option>
+                    <option value="premium commercial photography">Premium commercial</option>
+                    <option value="stylized 3D animation">Stylized 3D</option>
+                    <option value="hand-drawn graphic novel">Graphic novel</option>
+                    <option value="documentary naturalism">Documentary</option>
+                  </select>
+                </label>
+              </div>
+              <input className="form-input" placeholder="Continuity brief: character appearance, wardrobe, location, palette..." value={continuity} onChange={(event) => setContinuity(event.target.value)} maxLength={1000} />
+              <button className="btn btn-primary" type="submit" disabled={planning || script.trim().length < 20}>
+                {planning ? 'Planning scenes...' : selectedProject.scenes.length ? 'Replace with script plan' : 'Create storyboard plan'}
+              </button>
+            </form>
+
             <form className="glass-card" onSubmit={addScene} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-              <h3 style={{ margin: 0, fontSize: '1rem' }}>Add Storyboard Scene</h3>
+              <h3 style={{ margin: 0, fontSize: '1rem' }}>{editingSceneIndex === null ? 'Add Storyboard Scene' : `Edit Scene ${editingSceneIndex + 1}`}</h3>
               <input className="form-input" placeholder="Scene title" value={sceneTitle} onChange={(event) => setSceneTitle(event.target.value)} />
               <textarea className="form-textarea" rows={4} placeholder="Describe the shot, action, camera, dialogue, and mood..." value={scenePrompt} onChange={(event) => setScenePrompt(event.target.value)} />
-              <button className="btn btn-primary" type="submit">Save Scene</button>
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button className="btn btn-primary" type="submit">Save Scene</button>
+                {editingSceneIndex !== null && <button className="btn btn-secondary" type="button" onClick={() => { setEditingSceneIndex(null); setSceneTitle(''); setScenePrompt(''); }}>Cancel</button>}
+              </div>
             </form>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -196,6 +291,9 @@ export default function ProjectsPage() {
                       >
                         Generate in Studio
                       </a>
+                      <button className="btn btn-secondary" type="button" onClick={() => editScene(scene)} style={{ padding: '0.55rem 0.9rem', fontSize: '0.8rem' }}>
+                        Edit scene
+                      </button>
                       {scene.predictions?.slice(0, 3).map((prediction) => (
                         prediction.outputUrl ? (
                           <a key={prediction.id} href={prediction.outputUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)', fontSize: '0.8rem' }}>

@@ -108,6 +108,7 @@ export default function RootLayout({
     { name: "Video Studio", href: "/", icon: "🎬" },
     { name: "Projects", href: "/projects", icon: "🗂️" },
     { name: "Asset Library", href: "/library", icon: "📁" },
+    { name: "Characters & Brands", href: "/kits", icon: "✨" },
     { name: "Settings & API", href: "/settings", icon: "⚙️" },
   ];
 
@@ -183,6 +184,7 @@ export default function RootLayout({
                   {pathname === "/" && "Studio Creative Workspace"}
                   {pathname === "/projects" && "Projects & Storyboards"}
                   {pathname === "/library" && "Asset Vault & Library"}
+                  {pathname === "/kits" && "Characters & Brand Kits"}
                   {pathname === "/settings" && "Developer & Studio Settings"}
                   {pathname === "/privacy" && "Privacy Policy"}
                   {pathname === "/terms" && "Terms of Service"}

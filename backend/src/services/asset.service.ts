@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { storageService } from './storage.service';
 import { thumbnailQueueService } from './thumbnail-queue.service';
+import { getModelDefinition } from '../config/model-registry';
 
 const prisma = new PrismaClient();
 
@@ -9,6 +10,7 @@ type PredictionForAsset = {
   userId: string | null;
   projectId: string | null;
   workflow: string;
+  model: string;
 };
 
 type AssetForStorageBackfill = {
@@ -33,7 +35,7 @@ export async function createAssetForPrediction(
 
   if (existingAsset) return;
 
-  const type = prediction.workflow === 'text-to-image' ? 'image' : 'video';
+  const type = getModelDefinition(prediction.model)?.output || (['text-to-image', 'image-upscale'].includes(prediction.workflow) ? 'image' : 'video');
   let storedAsset = null;
 
   try {

@@ -695,6 +695,14 @@ body::after {
     grid-template-columns: minmax(0, 1fr) !important;
   }
 
+  .storyboard-plan-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .kit-basics {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
   .plan-grid {
     grid-template-columns: minmax(0, 1fr) !important;
   }
@@ -811,6 +819,9 @@ body::after {
 }
 
 @media (max-width: 480px) {
+  .storyboard-plan-controls {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
   .workspace-content {
     padding-right: 0.7rem;
     padding-left: 0.7rem;

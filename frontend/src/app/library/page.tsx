@@ -6,6 +6,7 @@ import { useAuth } from '../layout';
 
 interface AssetData {
   id: string;
+  storageObjectId: string | null;
   url: string;
   type: string;
   thumbnailUrl: string | null;
@@ -16,6 +17,34 @@ interface AssetData {
     model: string;
     workflow: string;
   } | null;
+}
+
+function actionHref(assetId: string, workflow: string, model?: string): string {
+  const query = new URLSearchParams({ workflow, asset_id: assetId });
+  if (model) query.set('model', model);
+  return `/?${query.toString()}`;
+}
+
+function assetActions(asset: AssetData) {
+  if (!asset.storageObjectId) return [];
+  if (asset.type === 'image') return [
+    { label: 'Save to kit', href: `/kits?asset_id=${encodeURIComponent(asset.id)}` },
+    { label: 'Animate', href: actionHref(asset.id, 'image-to-video') },
+    { label: 'Upscale', href: actionHref(asset.id, 'image-upscale') },
+    { label: 'Kling reference', href: actionHref(asset.id, 'video-edit') },
+    { label: 'Make variation', href: actionHref(asset.id, 'text-to-image', 'google/nano-banana-2') },
+  ];
+  if (asset.type === 'video') return [
+    { label: 'Save to kit', href: `/kits?asset_id=${encodeURIComponent(asset.id)}` },
+    { label: 'Kling edit', href: actionHref(asset.id, 'video-edit') },
+    { label: 'Enhance', href: actionHref(asset.id, 'video-enhance') },
+    { label: 'Extend', href: actionHref(asset.id, 'video-enhance', 'xai/grok-imagine-video-extension') },
+  ];
+  if (asset.type === 'audio') return [
+    { label: 'Save to kit', href: `/kits?asset_id=${encodeURIComponent(asset.id)}` },
+    { label: 'Use for lip sync', href: actionHref(asset.id, 'lip-sync') },
+  ];
+  return [];
 }
 
 export default function LibraryPage() {
@@ -72,6 +101,12 @@ export default function LibraryPage() {
       'bytedance/wan-2.5-fast': 'Wan 2.5 Fast',
       'black-forest-labs/flux-schnell': 'Flux Schnell',
       'stability-ai/stable-diffusion-3': 'SD 3',
+      'xai/grok-imagine-video-extension': 'Grok Video Extension',
+      'topazlabs/video-upscale': 'Topaz Video Upscale',
+      'philz1337x/crystal-video-upscaler': 'Crystal Video Upscaler',
+      'prunaai/p-image-upscale': 'P-Image Upscale',
+      'google/upscaler': 'Google Upscaler',
+      'philz1337x/clarity-pro-upscaler': 'Clarity Pro Upscaler',
     };
     return names[model] || model;
   };
@@ -190,6 +225,15 @@ export default function LibraryPage() {
                 <p style={{ fontSize: '0.8rem', color: 'var(--foreground-muted)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', height: '2.4rem', lineHeight: '1.2rem', margin: '0.25rem 0' }}>
                   {asset.prediction?.prompt || ''}
                 </p>
+                {assetActions(asset).length > 0 && (
+                  <div className="asset-send-actions" style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.65rem' }}>
+                    {assetActions(asset).map((action) => (
+                      <a key={action.label} href={action.href} className="btn btn-secondary" style={{ padding: '0.35rem 0.55rem', fontSize: '0.7rem', textDecoration: 'none' }}>
+                        {action.label}
+                      </a>
+                    ))}
+                  </div>
+                )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem', borderTop: '1px solid var(--panel-border)', paddingTop: '0.75rem' }}>
                   <span style={{ fontSize: '0.75rem', color: 'var(--foreground-muted)' }}>
                     {new Date(asset.createdAt).toLocaleDateString()}
