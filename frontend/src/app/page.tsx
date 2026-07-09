@@ -73,6 +73,21 @@ export default function StudioPage() {
   const [upscaleQuality, setUpscaleQuality] = useState(90);
   const [upscaleCreativity, setUpscaleCreativity] = useState(0);
   const [enhanceDetails, setEnhanceDetails] = useState(false);
+  const [captionPreset, setCaptionPreset] = useState<'social' | 'landscape'>('social');
+  const [captionPosition, setCaptionPosition] = useState('bottom75');
+  const [captionColor, setCaptionColor] = useState('white');
+  const [captionHighlightColor, setCaptionHighlightColor] = useState('yellow');
+  const [captionStrokeColor, setCaptionStrokeColor] = useState('black');
+  const [captionFont, setCaptionFont] = useState('Poppins/Poppins-ExtraBold.ttf');
+  const [captionFontSize, setCaptionFontSize] = useState(4);
+  const [captionMaxChars, setCaptionMaxChars] = useState(10);
+  const [captionOpacity, setCaptionOpacity] = useState(0);
+  const [captionStrokeWidth, setCaptionStrokeWidth] = useState(2.6);
+  const [captionKerning, setCaptionKerning] = useState(-5);
+  const [captionRightToLeft, setCaptionRightToLeft] = useState(false);
+  const [captionTranslate, setCaptionTranslate] = useState(false);
+  const [resizeFormat, setResizeFormat] = useState<'vertical' | 'square' | 'landscape'>('vertical');
+  const [resizeMode, setResizeMode] = useState<'crop' | 'fit'>('crop');
   const [enhanceRealism, setEnhanceRealism] = useState(false);
   const [enhanceTargetResolution, setEnhanceTargetResolution] = useState('1080p');
   const [enhanceTargetFps, setEnhanceTargetFps] = useState(30);
@@ -121,6 +136,8 @@ export default function StudioPage() {
     { id: 'video-edit', name: 'Kling Video Edit', icon: '🎭' },
     { id: 'video-enhance', name: 'Video Enhance', icon: '✨' },
     { id: 'image-upscale', name: 'Image Upscale', icon: '🔎' },
+    { id: 'video-caption', name: 'Social Captions', icon: '💬' },
+    { id: 'social-resize', name: 'Social Resize', icon: '📱' },
   ];
 
   const workflowModels = getModelsForWorkflow(workflow);
@@ -130,6 +147,8 @@ export default function StudioPage() {
   const isKlingEdit = workflow === 'video-edit';
   const isVideoEnhance = workflow === 'video-enhance';
   const isImageUpscale = workflow === 'image-upscale';
+  const isVideoCaption = workflow === 'video-caption';
+  const isSocialResize = workflow === 'social-resize';
   const isNanoBanana = activeModelDefinition?.family === 'nano-banana';
   const isRecraft = activeModelDefinition?.family === 'recraft';
   const isGrokImagineVideo = activeModelDefinition?.family === 'grok-video';
@@ -203,8 +222,8 @@ export default function StudioPage() {
   }, [token]);
 
   useEffect(() => {
-    if (!token || (!isVideoEnhance && !isImageUpscale)) return;
-    const sourceId = isVideoEnhance ? referenceVideos[0]?.id : imageStorageObjectId;
+    if (!token || (!isVideoEnhance && !isImageUpscale && !isVideoCaption && !isSocialResize)) return;
+    const sourceId = isVideoEnhance || isVideoCaption || isSocialResize ? referenceVideos[0]?.id : imageStorageObjectId;
     if (!sourceId) {
       setEnhancementQuote(null);
       setEnhancementQuoteError('');
@@ -220,20 +239,24 @@ export default function StudioPage() {
         target: upscaleTargetMp,
         upscale_factor: model === 'google/upscaler' ? `x${upscaleFactor}` : undefined,
         scale_factor: Number(upscaleFactor),
+        format: resizeFormat,
+        mode: resizeMode,
       };
       void api.quoteGeneration({
         workflow,
         model,
-        video_storage_object_id: isVideoEnhance ? sourceId : undefined,
+        video_storage_object_id: isVideoEnhance || isVideoCaption || isSocialResize ? sourceId : undefined,
         image_storage_object_id: isImageUpscale ? sourceId : undefined,
         params,
       }).then((quote) => setEnhancementQuote(quote.credits))
         .catch((error) => setEnhancementQuoteError(error.message || 'Could not calculate exact credit quote'));
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [token, workflow, model, isVideoEnhance, isImageUpscale, referenceVideos, imageStorageObjectId, extensionDuration, enhanceTargetResolution, enhanceTargetFps, upscaleTargetMp, upscaleFactor]);
+  }, [token, workflow, model, isVideoEnhance, isImageUpscale, isVideoCaption, isSocialResize, referenceVideos, imageStorageObjectId, extensionDuration, enhanceTargetResolution, enhanceTargetFps, upscaleTargetMp, upscaleFactor, resizeFormat, resizeMode]);
 
   const getBaseCredits = () => {
+    if (isSocialResize) return 0;
+    if (isVideoCaption) return 4;
     if (isImageUpscale) {
       if (model === 'google/upscaler') return 1;
       if (model === 'prunaai/p-image-upscale') return upscaleTargetMp <= 8 ? 1 : upscaleTargetMp <= 16 ? 1 : upscaleTargetMp <= 32 ? 2 : upscaleTargetMp <= 64 ? 2 : 4;
@@ -267,7 +290,7 @@ export default function StudioPage() {
   const baseCredits = getBaseCredits();
   const variationUnitCredits = model === 'google/nano-banana-pro' ? baseCredits : Math.ceil(baseCredits * 0.75);
   const totalCredits = baseCredits + Math.max(0, variations - 1) * variationUnitCredits;
-  const displayedCredits = isVideoEnhance || isImageUpscale ? enhancementQuote : totalCredits;
+  const displayedCredits = isVideoEnhance || isImageUpscale || isVideoCaption || isSocialResize ? enhancementQuote : totalCredits;
   const dynamicControlValues: Partial<Record<ControlKey, string | number | boolean>> = {
     target_resolution: enhanceTargetResolution,
     target_fps: enhanceTargetFps,
@@ -422,6 +445,38 @@ export default function StudioPage() {
     }
   };
 
+  const handleCaptionVideoUpload = async (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file) return;
+    try {
+      setGenerationError('');
+      const measured = await readVideoDuration(file);
+      if (measured > 60.05) throw new Error(`Caption clips are limited to 60 seconds. This video is ${measured.toFixed(1)} seconds.`);
+      setReferenceVideoDuration(measured);
+      setReferenceVideos(await uploadReferenceFiles(files, 1, 'video'));
+    } catch (error) {
+      setReferenceVideos([]);
+      setReferenceVideoDuration(null);
+      setGenerationError(error instanceof Error ? error.message : 'Caption video upload failed');
+    }
+  };
+
+  const handleSocialResizeVideoUpload = async (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file) return;
+    try {
+      setGenerationError('');
+      const measured = await readVideoDuration(file);
+      if (measured > 180.05) throw new Error(`Social resize clips are limited to 180 seconds. This video is ${measured.toFixed(1)} seconds.`);
+      setReferenceVideoDuration(measured);
+      setReferenceVideos(await uploadReferenceFiles(files, 1, 'video'));
+    } catch (error) {
+      setReferenceVideos([]);
+      setReferenceVideoDuration(null);
+      setGenerationError(error instanceof Error ? error.message : 'Social resize video upload failed');
+    }
+  };
+
   const handleQuickCreateProject = async () => {
     if (!quickProjectName.trim()) return;
     try {
@@ -487,7 +542,7 @@ export default function StudioPage() {
       ? ['image']
       : workflow === 'lip-sync'
         ? ['image', 'audio']
-        : isKlingEdit || isVideoEnhance
+        : isKlingEdit || isVideoEnhance || isVideoCaption || isSocialResize
           ? ['image', 'video']
           : isSeedance
             ? ['image', 'video', 'audio']
@@ -500,6 +555,7 @@ export default function StudioPage() {
     const storageId = asset.storageObjectId || '';
     if (workflow === 'image-to-video') return imageStorageObjectId === storageId;
     if (isImageUpscale) return imageStorageObjectId === storageId;
+    if (isVideoCaption || isSocialResize) return asset.type === 'video' && referenceVideos[0]?.id === storageId;
     if (workflow === 'lip-sync') return asset.type === 'image' ? imageStorageObjectId === storageId : audioStorageObjectId === storageId;
     if (asset.type === 'image') return referenceImages.some((item) => item.id === storageId);
     if (asset.type === 'video') return referenceVideos.some((item) => item.id === storageId);
@@ -514,6 +570,13 @@ export default function StudioPage() {
       kind: asset.type,
       name: asset.prediction?.prompt?.slice(0, 48) || `Library ${asset.type}`,
     };
+    if (isVideoCaption || isSocialResize) {
+      if (asset.type === 'video') {
+        setReferenceVideos([reference]);
+        setReferenceVideoDuration(null);
+      }
+      return;
+    }
 
     if (workflow === 'image-to-video' || isImageUpscale) {
       setImageFile(null);
@@ -596,6 +659,9 @@ export default function StudioPage() {
       setReferenceVideos([reference]);
       setReferenceVideoDuration(null);
       if (nextModel.id === 'xai/grok-imagine-video-extension') setPrompt('Continue the scene naturally from the final frame.');
+    } else if ((requestedWorkflow === 'video-caption' || requestedWorkflow === 'social-resize') && asset.type === 'video') {
+      setReferenceVideos([reference]);
+      setReferenceVideoDuration(null);
     } else if (requestedWorkflow === 'text-to-image' && asset.type === 'image') {
       setReferenceImages([reference]);
     } else if (requestedWorkflow === 'lip-sync') {
@@ -704,12 +770,17 @@ export default function StudioPage() {
         setGenerationError('Please describe what should happen next in the video.');
         return;
       }
+    } else if (isSocialResize) {
+      if (!referenceVideos[0]) {
+        setGenerationError('Please upload or select a source video.');
+        return;
+      }
     }
     if (workflow === 'video-edit' && !referenceVideos[0]) {
       setGenerationError('Please upload a 3–10 second source video. Reference images are optional unless your prompt uses one.');
       return;
     }
-    if ((isVideoEnhance || isImageUpscale) && enhancementQuote === null) {
+    if ((isVideoEnhance || isImageUpscale || isSocialResize) && enhancementQuote === null) {
       setGenerationError(enhancementQuoteError || 'Please wait for the exact credit quote before submitting.');
       return;
     }
@@ -799,6 +870,30 @@ export default function StudioPage() {
           target_resolution: enhanceTargetResolution,
           target_fps: enhanceTargetFps,
           scale_factor: Number(upscaleFactor),
+        };
+      } else if (isVideoCaption && referenceVideos[0]) {
+        generatePayload.video_storage_object_id = referenceVideos[0].id;
+        generatePayload.params = {
+          subs_position: captionPosition,
+          color: captionColor,
+          highlight_color: captionHighlightColor,
+          fontsize: captionFontSize,
+          MaxChars: captionMaxChars,
+          opacity: captionOpacity,
+          font: captionFont,
+          stroke_color: captionStrokeColor,
+          stroke_width: captionStrokeWidth,
+          kerning: captionKerning,
+          right_to_left: captionRightToLeft,
+          translate: captionTranslate,
+          variations: 1,
+        };
+      } else if (isSocialResize && referenceVideos[0]) {
+        generatePayload.video_storage_object_id = referenceVideos[0].id;
+        generatePayload.params = {
+          format: resizeFormat,
+          mode: resizeMode,
+          variations: 1,
         };
       } else if (workflow === 'lip-sync' && imageStorageObjectId && audioStorageObjectId) {
         generatePayload.image_storage_object_id = imageStorageObjectId;
@@ -898,6 +993,23 @@ export default function StudioPage() {
                     setImageStorageObjectId('');
                     setImagePreview('');
                     setImageFile(null);
+                  }
+                  if (wf.id === 'video-caption') {
+                    setVariations(1);
+                    setPrompt('');
+                    setReferenceVideos([]);
+                    setReferenceVideoDuration(null);
+                    setCaptionPreset('social');
+                    setCaptionFontSize(4);
+                    setCaptionMaxChars(10);
+                  }
+                  if (wf.id === 'social-resize') {
+                    setVariations(1);
+                    setPrompt('');
+                    setReferenceVideos([]);
+                    setReferenceVideoDuration(null);
+                    setResizeFormat('vertical');
+                    setResizeMode('crop');
                   }
                 }}
                 className={`btn ${isActive ? 'btn-primary' : 'btn-secondary'}`}
@@ -1144,6 +1256,88 @@ export default function StudioPage() {
             </div>
           )}
 
+          {isVideoCaption && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.35rem' }}>1. Choose a source video</h3>
+                <p style={{ color: 'var(--foreground-muted)', fontSize: '0.82rem', margin: 0 }}>Add styled, karaoke-style captions to a clip up to 60 seconds. The captioned video and editable transcript are saved to your Library.</p>
+              </div>
+              <label style={{ border: '2px dashed var(--panel-border)', borderRadius: '12px', padding: '1rem', cursor: 'pointer', background: referenceVideos.length ? 'rgba(139, 92, 246, 0.08)' : 'rgba(255, 255, 255, 0.02)' }}>
+                <input type="file" accept="video/mp4,video/quicktime,video/webm" onChange={(event) => void handleCaptionVideoUpload(event.target.files)} style={{ display: 'none' }} />
+                <strong style={{ display: 'block' }}>{referenceVideos[0]?.name || 'Choose video to caption'}</strong>
+                <span style={{ color: 'var(--foreground-muted)', fontSize: '0.75rem' }}>{referenceVideoDuration ? `${referenceVideoDuration.toFixed(1)} seconds` : 'Maximum 60 seconds / 200 MB'}</span>
+              </label>
+
+              <div>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.75rem' }}>2. Caption style</h3>
+                <div className="caption-control-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.85rem' }}>
+                  <div><label className="form-label">Format preset</label><select aria-label="Caption preset" className="form-select" value={captionPreset} onChange={(event) => {
+                    const preset = event.target.value as 'social' | 'landscape';
+                    setCaptionPreset(preset);
+                    setCaptionFontSize(preset === 'social' ? 4 : 7);
+                    setCaptionMaxChars(preset === 'social' ? 10 : 20);
+                  }}><option value="social">Reels / Shorts</option><option value="landscape">Landscape video</option></select></div>
+                  <div><label className="form-label">Position</label><select aria-label="Caption position" className="form-select" value={captionPosition} onChange={(event) => setCaptionPosition(event.target.value)}><option value="bottom75">Lower third</option><option value="bottom">Bottom</option><option value="center">Center</option><option value="top">Top</option></select></div>
+                  <div><label className="form-label">Font</label><select aria-label="Caption font" className="form-select" value={captionFont} onChange={(event) => setCaptionFont(event.target.value)}><option value="Poppins/Poppins-ExtraBold.ttf">Poppins Extra Bold</option><option value="Arial.ttf">Arial (RTL compatible)</option></select></div>
+                  <div><label className="form-label">Font size ({captionFontSize})</label><input aria-label="Caption font size" className="form-range" type="range" min={2} max={12} step={0.5} value={captionFontSize} onChange={(event) => setCaptionFontSize(Number(event.target.value))} /></div>
+                  <div><label className="form-label">Caption color</label><input aria-label="Caption color" className="form-input" value={captionColor} onChange={(event) => setCaptionColor(event.target.value)} placeholder="white or #ffffff" /></div>
+                  <div><label className="form-label">Highlight color</label><input aria-label="Highlight color" className="form-input" value={captionHighlightColor} onChange={(event) => setCaptionHighlightColor(event.target.value)} placeholder="yellow or #ffff00" /></div>
+                  <div><label className="form-label">Characters per caption ({captionMaxChars})</label><input aria-label="Characters per caption" className="form-range" type="range" min={5} max={40} step={1} value={captionMaxChars} onChange={(event) => setCaptionMaxChars(Number(event.target.value))} /></div>
+                  <div><label className="form-label">Background opacity ({captionOpacity})</label><input aria-label="Caption background opacity" className="form-range" type="range" min={0} max={1} step={0.1} value={captionOpacity} onChange={(event) => setCaptionOpacity(Number(event.target.value))} /></div>
+                </div>
+                <details style={{ marginTop: '1rem' }}><summary style={{ cursor: 'pointer', color: 'var(--foreground-muted)', fontSize: '0.85rem' }}>Advanced caption controls</summary>
+                  <div className="caption-control-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.85rem', marginTop: '0.85rem' }}>
+                    <div><label className="form-label">Stroke color</label><input aria-label="Stroke color" className="form-input" value={captionStrokeColor} onChange={(event) => setCaptionStrokeColor(event.target.value)} /></div>
+                    <div><label className="form-label">Stroke width ({captionStrokeWidth})</label><input aria-label="Stroke width" className="form-range" type="range" min={0} max={8} step={0.1} value={captionStrokeWidth} onChange={(event) => setCaptionStrokeWidth(Number(event.target.value))} /></div>
+                    <div><label className="form-label">Kerning ({captionKerning})</label><input aria-label="Caption kerning" className="form-range" type="range" min={-10} max={10} step={1} value={captionKerning} onChange={(event) => setCaptionKerning(Number(event.target.value))} /></div>
+                    <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>Right-to-left text<input type="checkbox" checked={captionRightToLeft} onChange={(event) => { setCaptionRightToLeft(event.target.checked); if (event.target.checked) setCaptionFont('Arial.ttf'); }} /></label>
+                    <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>Translate captions to English<input type="checkbox" checked={captionTranslate} onChange={(event) => setCaptionTranslate(event.target.checked)} /></label>
+                  </div>
+                </details>
+              </div>
+            </div>
+          )}
+
+          {isSocialResize && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.35rem' }}>1. Choose a source video</h3>
+                <p style={{ color: 'var(--foreground-muted)', fontSize: '0.82rem', margin: 0 }}>
+                  Create platform-ready 9:16, 1:1, or 16:9 exports from an existing clip. This local resize pass is free; outputs are saved to your Library.
+                </p>
+              </div>
+              <label style={{ border: '2px dashed var(--panel-border)', borderRadius: '12px', padding: '1rem', cursor: 'pointer', background: referenceVideos.length ? 'rgba(139, 92, 246, 0.08)' : 'rgba(255, 255, 255, 0.02)' }}>
+                <input type="file" accept="video/mp4,video/quicktime,video/webm" onChange={(event) => void handleSocialResizeVideoUpload(event.target.files)} style={{ display: 'none' }} />
+                <strong style={{ display: 'block' }}>{referenceVideos[0]?.name || 'Choose video to resize'}</strong>
+                <span style={{ color: 'var(--foreground-muted)', fontSize: '0.75rem' }}>{referenceVideoDuration ? `${referenceVideoDuration.toFixed(1)} seconds` : 'Maximum 180 seconds / 200 MB'}</span>
+              </label>
+
+              <div>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '0.75rem' }}>2. Pick export format</h3>
+                <div className="caption-control-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.85rem' }}>
+                  <div>
+                    <label className="form-label">Target format</label>
+                    <select aria-label="Resize format" className="form-select" value={resizeFormat} onChange={(event) => setResizeFormat(event.target.value as 'vertical' | 'square' | 'landscape')}>
+                      <option value="vertical">9:16 Reels / Shorts</option>
+                      <option value="square">1:1 Feed Square</option>
+                      <option value="landscape">16:9 YouTube / Web</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="form-label">Framing mode</label>
+                    <select aria-label="Resize mode" className="form-select" value={resizeMode} onChange={(event) => setResizeMode(event.target.value as 'crop' | 'fit')}>
+                      <option value="crop">Fill frame crop</option>
+                      <option value="fit">Fit with letterbox</option>
+                    </select>
+                  </div>
+                </div>
+                <p style={{ color: 'var(--foreground-muted)', fontSize: '0.75rem', margin: '0.65rem 0 0' }}>
+                  Crop is best for punchy social clips. Fit preserves the full frame with padding when you do not want to lose edges.
+                </p>
+              </div>
+            </div>
+          )}
+
           {isSeedance && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
@@ -1293,7 +1487,7 @@ export default function StudioPage() {
                     : token
                       ? displayedCredits === null
                         ? 'Inspecting the source to calculate an exact credit charge…'
-                        : `This request will consume ${displayedCredits} credit${displayedCredits === 1 ? '' : 's'}.${isVideoEnhance || isImageUpscale ? ' Exact price verified from the source media.' : ' Variations cost extra.'}`
+                        : `This request will consume ${displayedCredits} credit${displayedCredits === 1 ? '' : 's'}.${isVideoEnhance || isImageUpscale || isVideoCaption || isSocialResize ? ' Exact price verified from the source media.' : ' Variations cost extra.'}`
                       : 'Sign in to start generating.'}
                 </p>
               </div>
@@ -1309,7 +1503,9 @@ export default function StudioPage() {
                   (workflow === 'video-edit' && (!prompt || !referenceVideos[0])) ||
                   (workflow === 'video-enhance' && (!referenceVideos[0] || (model === 'xai/grok-imagine-video-extension' && !prompt))) ||
                   (workflow === 'image-upscale' && !imageStorageObjectId) ||
-                  ((workflow === 'video-enhance' || workflow === 'image-upscale') && enhancementQuote === null) ||
+                  (isVideoCaption && !referenceVideos[0]) ||
+                  (isSocialResize && !referenceVideos[0]) ||
+                  ((workflow === 'video-enhance' || workflow === 'image-upscale' || workflow === 'video-caption' || workflow === 'social-resize') && enhancementQuote === null) ||
                   (workflow === 'image-to-video' && !imageStorageObjectId) ||
                   (workflow === 'lip-sync' && (!imageStorageObjectId || !audioStorageObjectId)) || uploadProgress !== null
                 }
@@ -1321,7 +1517,9 @@ export default function StudioPage() {
                   (workflow === 'video-edit' && (!prompt || !referenceVideos[0])) ||
                   (workflow === 'video-enhance' && (!referenceVideos[0] || (model === 'xai/grok-imagine-video-extension' && !prompt))) ||
                   (workflow === 'image-upscale' && !imageStorageObjectId) ||
-                  ((workflow === 'video-enhance' || workflow === 'image-upscale') && enhancementQuote === null) ||
+                  (isVideoCaption && !referenceVideos[0]) ||
+                  (isSocialResize && !referenceVideos[0]) ||
+                  ((workflow === 'video-enhance' || workflow === 'image-upscale' || workflow === 'video-caption' || workflow === 'social-resize') && enhancementQuote === null) ||
                   (workflow === 'image-to-video' && !imageStorageObjectId) ||
                   (workflow === 'lip-sync' && (!imageStorageObjectId || !audioStorageObjectId)) || uploadProgress !== null ? 0.5 : 1 }}
               >
@@ -1566,7 +1764,7 @@ export default function StudioPage() {
           <CinematicControls value={cinematicSettings} onChange={setCinematicSettings} />
         )}
 
-        {!isVideoEnhance && !isImageUpscale ? <div>
+        {!isVideoEnhance && !isImageUpscale && !isVideoCaption && !isSocialResize ? <div>
           <label className="form-label">Variations</label>
           <select className="form-select" value={variations} onChange={(e) => setVariations(Number(e.target.value))}>
             {[1, 2, 3, 4].map((count) => (
@@ -1582,13 +1780,17 @@ export default function StudioPage() {
           <div style={{ padding: '0.8rem', border: '1px solid var(--panel-border)', borderRadius: '10px' }}>
             <strong>{enhancementQuote === null ? 'Inspecting source…' : `Exact charge: ${enhancementQuote} credits`}</strong>
             <p style={{ color: 'var(--foreground-muted)', fontSize: '0.75rem', margin: '0.35rem 0 0' }}>
-              {enhancementQuoteError || 'Calculated server-side from the inspected source duration, dimensions, FPS, and selected output size before provider submission.'}
+              {enhancementQuoteError || (isSocialResize
+                ? 'Free local FFmpeg export. Source ownership and the 180-second limit are verified before processing.'
+                : isVideoCaption
+                  ? 'Fixed at 4 credits for one captioned video plus its editable transcript. Source ownership and the 60-second limit are verified before submission.'
+                  : 'Calculated server-side from the inspected source duration, dimensions, FPS, and selected output size before provider submission.')}
             </p>
           </div>
         )}
 
         {/* Duration Slider */}
-        {workflow !== 'text-to-image' && !isSeedance && !isKlingEdit && !isVideoEnhance && !isImageUpscale && (
+        {workflow !== 'text-to-image' && !isSeedance && !isKlingEdit && !isVideoEnhance && !isImageUpscale && !isVideoCaption && !isSocialResize && (
           <div className="slider-container">
             <div className="slider-header">
               <span>Duration</span>
@@ -1645,7 +1847,7 @@ export default function StudioPage() {
         )}
 
         {/* FPS Slider */}
-        {workflow !== 'text-to-image' && !isSeedance && !isKlingEdit && !isVideoEnhance && !isImageUpscale && (
+        {workflow !== 'text-to-image' && !isSeedance && !isKlingEdit && !isVideoEnhance && !isImageUpscale && !isVideoCaption && (
           <div className="slider-container">
             <div className="slider-header">
               <span>Frame Rate</span>
@@ -1656,7 +1858,7 @@ export default function StudioPage() {
         )}
 
         {/* Camera Moves */}
-        {workflow !== 'text-to-image' && !isSeedance && !isKlingEdit && !isVideoEnhance && !isImageUpscale && (
+        {workflow !== 'text-to-image' && !isSeedance && !isKlingEdit && !isVideoEnhance && !isImageUpscale && !isVideoCaption && (
           <div>
             <label className="form-label">Camera Motion</label>
             <select className="form-select" value={cameraMove} onChange={(e) => setCameraMove(e.target.value)}>

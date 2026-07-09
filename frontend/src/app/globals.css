@@ -703,6 +703,10 @@ body::after {
     grid-template-columns: minmax(0, 1fr) !important;
   }
 
+  .caption-control-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
   .plan-grid {
     grid-template-columns: minmax(0, 1fr) !important;
   }

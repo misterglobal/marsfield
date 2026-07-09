@@ -5,10 +5,11 @@ import { PredictionInput, ReplicateService } from '../services/replicate.service
 import { queueService } from '../services/queue.service';
 import { quoteGeneration } from '../services/billing.service';
 import { randomUUID } from 'crypto';
-import { createAssetForPrediction } from '../services/asset.service';
+import { createAssetForPrediction, createAssetFromBufferForPrediction, createSupplementaryAssetForPrediction } from '../services/asset.service';
 import { getRemoteImageMegapixels, getRemoteVideoDuration, getRemoteVideoMetadata } from '../services/media-probe.service';
 import { rateLimit } from '../middleware/rate-limit.middleware';
 import { getModelDefinition, modelIdsForFamily, modelSupportsWorkflow } from '../config/model-registry';
+import { assertSocialResizeFormat, assertSocialResizeMode, renderSocialResize, socialResizeLabel } from '../services/social-resize.service';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -131,8 +132,22 @@ router.post('/generate/quote', authMiddleware, requireScope('generation:write'),
         : inputMegapixels * (model === 'google/upscaler'
           ? (params.upscale_factor === 'x4' ? 16 : 4)
           : Number(params.scale_factor ?? 2) ** 2);
+    } else if (workflow === 'video-caption' && getModelDefinition(model)?.family === 'caption') {
+      const video = await resolveOwnedStorageObject(req.user.id, req.body.video_storage_object_id, 'video/', 'Caption source video');
+      if (!video) throw new Error('Owned video asset required');
+      const duration = await getRemoteVideoDuration(video);
+      if (duration > 60) throw new Error('Caption clips are limited to 60 seconds');
+      billingParams.duration = duration;
+    } else if (workflow === 'social-resize' && model === 'local/ffmpeg-social-resize') {
+      const video = await resolveOwnedStorageObject(req.user.id, req.body.video_storage_object_id, 'video/', 'Resize source video');
+      if (!video) throw new Error('Owned video asset required');
+      const duration = await getRemoteVideoDuration(video);
+      if (duration > 180) throw new Error('Social resize clips are limited to 180 seconds');
+      billingParams.duration = duration;
+      billingParams.format = assertSocialResizeFormat(params.format);
+      billingParams.mode = assertSocialResizeMode(params.mode);
     } else {
-      throw new Error('Exact quotes are available for enhancement workflows');
+      throw new Error('Exact quotes are available for enhancement, caption, and social resize workflows');
     }
 
     const quote = quoteGeneration({ workflow, model, params: billingParams });
@@ -170,7 +185,7 @@ router.post('/generate', authMiddleware, requireScope('generation:write'), rateL
     }
 
     // Validate workflow
-    const validWorkflows = ['text-to-video', 'image-to-video', 'lip-sync', 'text-to-image', 'multi-image-video', 'multimodal-video', 'character-replace', 'video-edit', 'video-enhance', 'image-upscale'];
+    const validWorkflows = ['text-to-video', 'image-to-video', 'lip-sync', 'text-to-image', 'multi-image-video', 'multimodal-video', 'character-replace', 'video-edit', 'video-enhance', 'image-upscale', 'video-caption', 'social-resize'];
     if (!validWorkflows.includes(workflow)) {
        res.status(400).json({ error: 'Invalid workflow type' });
        return;
@@ -183,7 +198,7 @@ router.post('/generate', authMiddleware, requireScope('generation:write'), rateL
     }
 
     // Validate model string (prevent injection)
-    if (!/^[\w\-\.\/]+$/.test(model)) {
+    if (!/^[\w\-\.\/:]+$/.test(model)) {
        res.status(400).json({ error: 'Invalid model identifier' });
        return;
     }
@@ -386,6 +401,66 @@ router.post('/generate', authMiddleware, requireScope('generation:write'), rateL
           seed: Number.isInteger(params?.seed) ? params.seed : undefined,
           fast_mode: model === 'bytedance/omni-human-1.5' ? params?.fast_mode === true : undefined,
         };
+      } else if (workflow === 'video-caption') {
+        const video = await resolveOwnedStorageObject(user.id, req.body.video_storage_object_id, 'video/', 'Caption source video');
+        if (!video) throw new Error('Captioning requires an owned video asset');
+        const sourceDuration = await getRemoteVideoDuration(video);
+        if (sourceDuration > 60) throw new Error('Caption clips are limited to 60 seconds');
+        const font = String(params?.font || 'Poppins/Poppins-ExtraBold.ttf');
+        const allowedFonts = ['Poppins/Poppins-ExtraBold.ttf', 'Arial.ttf'];
+        const subsPosition = String(params?.subs_position || 'bottom75');
+        const fontsize = Number(params?.fontsize ?? 4);
+        const maxChars = Number(params?.MaxChars ?? 10);
+        const opacity = Number(params?.opacity ?? 0);
+        const strokeWidth = Number(params?.stroke_width ?? 2.6);
+        const kerning = Number(params?.kerning ?? -5);
+        const safeColor = (value: unknown, fallback: string) => {
+          const color = String(value || fallback).trim();
+          if (!/^(#[0-9a-f]{6}|[a-z]{3,20})$/i.test(color)) throw new Error('Caption colors must be a color name or six-digit hex value');
+          return color;
+        };
+        if (!allowedFonts.includes(font)) throw new Error('Unsupported caption font');
+        if (!['bottom75', 'bottom', 'top', 'center', 'left', 'right'].includes(subsPosition)) throw new Error('Unsupported caption position');
+        if (!Number.isFinite(fontsize) || fontsize < 2 || fontsize > 12) throw new Error('Caption font size must be from 2 to 12');
+        if (!Number.isInteger(maxChars) || maxChars < 5 || maxChars > 40) throw new Error('Maximum caption characters must be from 5 to 40');
+        if (!Number.isFinite(opacity) || opacity < 0 || opacity > 1) throw new Error('Caption background opacity must be from 0 to 1');
+        if (!Number.isFinite(strokeWidth) || strokeWidth < 0 || strokeWidth > 8) throw new Error('Caption stroke width must be from 0 to 8');
+        if (!Number.isFinite(kerning) || kerning < -10 || kerning > 10) throw new Error('Caption kerning must be from -10 to 10');
+        billingParams.duration = sourceDuration;
+        predictionInput = {
+          video_file_input: video,
+          output_video: true,
+          output_transcript: true,
+          subs_position: subsPosition,
+          color: safeColor(params?.color, 'white'),
+          highlight_color: safeColor(params?.highlight_color, 'yellow'),
+          fontsize,
+          MaxChars: maxChars,
+          opacity,
+          font,
+          stroke_color: safeColor(params?.stroke_color, 'black'),
+          stroke_width: strokeWidth,
+          kerning,
+          right_to_left: params?.right_to_left === true,
+          translate: params?.translate === true,
+        };
+      } else if (workflow === 'social-resize') {
+        const video = await resolveOwnedStorageObject(user.id, req.body.video_storage_object_id, 'video/', 'Resize source video');
+        if (!video) throw new Error('Social resize requires an owned video asset');
+        const sourceDuration = await getRemoteVideoDuration(video);
+        if (sourceDuration > 180) throw new Error('Social resize clips are limited to 180 seconds');
+        const format = assertSocialResizeFormat(params?.format);
+        const mode = assertSocialResizeMode(params?.mode);
+        billingParams.duration = sourceDuration;
+        billingParams.format = format;
+        billingParams.mode = mode;
+        billingParams.variations = 1;
+        predictionInput = {
+          source_video: video,
+          format,
+          mode,
+          aspect_ratio: socialResizeLabel(format),
+        };
       } else if (workflow === 'text-to-image') {
         if (!IMAGE_MODELS.has(model)) throw new Error('Unsupported image generation model');
         if (typeof prompt !== 'string' || !prompt.trim()) throw new Error('Image generation requires a prompt');
@@ -533,6 +608,76 @@ router.post('/generate', authMiddleware, requireScope('generation:write'), rateL
       }
     }
 
+    if (workflow === 'social-resize') {
+      const sourceVideo = String(predictionInput.source_video || '');
+      const format = assertSocialResizeFormat(predictionInput.format);
+      const mode = assertSocialResizeMode(predictionInput.mode);
+      const prediction = await prisma.prediction.create({
+        data: {
+          userId: user.id,
+          projectId,
+          storyboardSceneId,
+          workflow,
+          model,
+          prompt: `Resize video for ${socialResizeLabel(format)} (${mode})`,
+          inputParams: {
+            format,
+            mode,
+            aspect_ratio: socialResizeLabel(format),
+            source_video_storage_object_id: req.body.video_storage_object_id,
+          },
+          variationIndex: 0,
+          variationCount: 1,
+          creditCost: 0,
+          status: 'processing',
+        },
+      });
+
+      try {
+        const outputBuffer = await renderSocialResize({ sourceUrl: sourceVideo, format, mode });
+        const asset = await createAssetFromBufferForPrediction(prediction, outputBuffer, {
+          mimeType: 'video/mp4',
+          assetType: 'video',
+          originalName: `social-resize-${format}-${mode}.mp4`,
+          metadata: { workflow, format, mode },
+        });
+        const completedPrediction = await prisma.prediction.update({
+          where: { id: prediction.id },
+          data: { status: 'succeeded', outputUrl: asset.url, completedAt: new Date() },
+        });
+        await prisma.usageEvent.create({
+          data: {
+            userId: user.id,
+            predictionId: prediction.id,
+            eventType: 'generation',
+            credits: 0,
+            metadata: { workflow, model, format, mode },
+          },
+        });
+        res.status(201).json({
+          id: completedPrediction.id,
+          status: completedPrediction.status,
+          output_url: completedPrediction.outputUrl,
+          created_at: completedPrediction.createdAt,
+          credits_charged: 0,
+          variation_group_id: null,
+          predictions: [{
+            id: completedPrediction.id,
+            status: completedPrediction.status,
+            output_url: completedPrediction.outputUrl,
+            variation_index: 0,
+          }],
+        });
+      } catch (error) {
+        await prisma.prediction.update({
+          where: { id: prediction.id },
+          data: { status: 'failed', errorMessage: error instanceof Error ? error.message : 'Social resize failed', completedAt: new Date() },
+        });
+        throw error;
+      }
+      return;
+    }
+
     // Call replicate client wrapper
     const webhookBaseUrl = process.env.WEBHOOK_BASE_URL;
     const webhookUrl = webhookBaseUrl?.startsWith('https://')
@@ -604,6 +749,9 @@ router.post('/generate', authMiddleware, requireScope('generation:write'), rateL
       } else if (repPrediction.outputUrl) {
         // Create user asset immediately if succeeded synchronously
         await createAssetForPrediction(prediction, repPrediction.outputUrl);
+        if (workflow === 'video-caption' && repPrediction.outputUrls?.[1]) {
+          await createSupplementaryAssetForPrediction(prediction, repPrediction.outputUrls[1], 'document');
+        }
       }
     }
 

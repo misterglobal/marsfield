@@ -36,6 +36,8 @@ function assetActions(asset: AssetData) {
   ];
   if (asset.type === 'video') return [
     { label: 'Save to kit', href: `/kits?asset_id=${encodeURIComponent(asset.id)}` },
+    { label: 'Resize for social', href: actionHref(asset.id, 'social-resize') },
+    { label: 'Add captions', href: actionHref(asset.id, 'video-caption') },
     { label: 'Kling edit', href: actionHref(asset.id, 'video-edit') },
     { label: 'Enhance', href: actionHref(asset.id, 'video-enhance') },
     { label: 'Extend', href: actionHref(asset.id, 'video-enhance', 'xai/grok-imagine-video-extension') },
@@ -193,8 +195,9 @@ export default function LibraryPage() {
                 )}
                 {!asset.thumbnailUrl && asset.type === 'audio' && <span style={{ fontSize: '3rem' }}>🎵</span>}
                 {!asset.thumbnailUrl && asset.type === 'video' && <span style={{ fontSize: '3rem' }}>🎬</span>}
+                {!asset.thumbnailUrl && asset.type === 'document' && <span style={{ fontSize: '3rem' }}>📄</span>}
                 <span className="asset-tag" style={{ textTransform: 'capitalize' }}>
-                  {asset.type === 'video' ? '🎬 Video' : asset.type === 'audio' ? '🎵 Audio' : '🖼️ Image'}
+                  {asset.type === 'video' ? '🎬 Video' : asset.type === 'audio' ? '🎵 Audio' : asset.type === 'document' ? '📄 Transcript' : '🖼️ Image'}
                 </span>
                 <button
                   onClick={() => toggleFavorite(asset.id)}

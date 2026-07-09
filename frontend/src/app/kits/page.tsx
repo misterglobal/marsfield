@@ -34,7 +34,7 @@ export default function KitsPage() {
     try {
       const [kitData, assetData, projectData] = await Promise.all([api.getKits(), api.getAssets(), api.getProjects()]);
       setKits(kitData);
-      setAssets(assetData.filter((asset: AssetOption) => asset.storageObjectId));
+      setAssets(assetData.filter((asset: AssetOption) => asset.storageObjectId && ['image', 'video', 'audio'].includes(asset.type)));
       setProjects(projectData.map((project: ProjectOption) => ({ id: project.id, name: project.name })));
       const deepLinkedAssetId = new URLSearchParams(window.location.search).get('asset_id');
       if (deepLinkedAssetId && assetData.some((asset: AssetOption) => asset.id === deepLinkedAssetId && asset.storageObjectId)) {

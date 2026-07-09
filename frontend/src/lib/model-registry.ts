@@ -1,5 +1,5 @@
-export type WorkflowId = 'text-to-video' | 'image-to-video' | 'lip-sync' | 'text-to-image' | 'multimodal-video' | 'video-edit' | 'video-enhance' | 'image-upscale';
-export type ModelFamily = 'general' | 'seedance' | 'nano-banana' | 'recraft' | 'grok-video' | 'kling-edit' | 'video-enhance' | 'image-upscale';
+export type WorkflowId = 'text-to-video' | 'image-to-video' | 'lip-sync' | 'text-to-image' | 'multimodal-video' | 'video-edit' | 'video-enhance' | 'image-upscale' | 'video-caption' | 'social-resize';
+export type ModelFamily = 'general' | 'seedance' | 'nano-banana' | 'recraft' | 'grok-video' | 'kling-edit' | 'video-enhance' | 'image-upscale' | 'caption' | 'local-processing';
 export type ControlKey = 'target_resolution' | 'target_fps' | 'scale_factor' | 'extension_duration' | 'target_megapixels' | 'enhance_details' | 'enhance_realism' | 'upscale_factor' | 'quality' | 'creativity' | 'output_format';
 
 export interface ModelControl {
@@ -84,6 +84,8 @@ export const MODEL_REGISTRY: readonly ModelDefinition[] = [
       select('output_format', 'Output Format', 'png', [['PNG', 'png'], ['JPG', 'jpg']]),
     ],
   },
+  { id: 'fictions-ai/autocaption:18a45ff0d95feb4449d192bbdc06b4a6df168fa33def76dfc51b78ae224b599b', name: 'AutoCaption', workflow: 'video-caption', family: 'caption', speed: 'Styled + Transcript', output: 'video' },
+  { id: 'local/ffmpeg-social-resize', name: 'Social Resize', workflow: 'social-resize', family: 'local-processing', speed: 'Free Local Export', output: 'video' },
 ] as const;
 
 export const getModelsForWorkflow = (workflow: string) => MODEL_REGISTRY.filter((model) => model.workflow === workflow);

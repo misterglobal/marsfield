@@ -11,6 +11,15 @@ function getString(value) {
         return undefined;
     return String(value);
 }
+function getOutputUrl(value) {
+    if (typeof value === 'string')
+        return value;
+    if (value && typeof value === 'object') {
+        const record = value;
+        return getOutputUrl(record.url || record.href);
+    }
+    return undefined;
+}
 function isCancellationEvent(type) {
     return ['license.cancelled', 'license.expired', 'subscription.canceled', 'subscription.cancelled'].includes(type);
 }
@@ -33,7 +42,7 @@ router.post('/replicate', async (req, res) => {
             return;
         }
         const finalStatus = status === 'succeeded' ? 'succeeded' : status === 'failed' ? 'failed' : 'processing';
-        const outputUrl = Array.isArray(output) ? output[0] : output;
+        const outputUrl = getOutputUrl(Array.isArray(output) ? output[0] : output);
         const updatedPrediction = await prisma.prediction.update({
             where: { id: prediction.id },
             data: {
@@ -45,6 +54,10 @@ router.post('/replicate', async (req, res) => {
         });
         if (finalStatus === 'succeeded' && outputUrl) {
             await (0, asset_service_1.createAssetForPrediction)(updatedPrediction, outputUrl);
+            const transcriptUrl = Array.isArray(output) ? getOutputUrl(output[1]) : undefined;
+            if (prediction.workflow === 'video-caption' && transcriptUrl) {
+                await (0, asset_service_1.createSupplementaryAssetForPrediction)(updatedPrediction, transcriptUrl, 'document');
+            }
         }
         console.log(`Webhook Event processed for prediction ${prediction.id}. Status: ${finalStatus}`);
         res.status(200).send('OK');

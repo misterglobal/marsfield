@@ -184,6 +184,9 @@ class QueueService {
         });
         if (status === 'succeeded' && prediction.outputUrl) {
             await (0, asset_service_1.createAssetForPrediction)(prediction, prediction.outputUrl);
+            if (prediction.workflow === 'video-caption' && result.outputUrls?.[1]) {
+                await (0, asset_service_1.createSupplementaryAssetForPrediction)(prediction, result.outputUrls[1], 'document');
+            }
         }
         return isTerminal;
     }

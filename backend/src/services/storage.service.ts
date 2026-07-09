@@ -25,7 +25,7 @@ interface StoreBufferInput {
   userId: string;
   mimeType: string;
   assetType: string;
-  namespace: 'uploads' | 'thumbnails';
+  namespace: 'uploads' | 'thumbnails' | 'processed';
   objectId?: string;
   originalName?: string;
   metadata?: Record<string, string>;
@@ -118,8 +118,10 @@ function extensionForAsset(sourceUrl: string, mimeType: string | null, assetType
   if (mimeType?.includes('mpeg')) return 'mp3';
   if (mimeType?.includes('wav')) return 'wav';
   if (mimeType?.includes('mp4')) return 'mp4';
+  if (mimeType?.includes('json')) return 'json';
+  if (mimeType?.includes('text')) return 'txt';
 
-  return assetType === 'image' ? 'png' : 'mp4';
+  return assetType === 'image' ? 'png' : assetType === 'document' ? 'json' : 'mp4';
 }
 
 export class StorageService {
@@ -201,7 +203,9 @@ export class StorageService {
     const now = new Date();
     const key = input.namespace === 'uploads'
       ? ['users', input.userId, 'uploads', String(now.getUTCFullYear()), String(now.getUTCMonth() + 1).padStart(2, '0'), `${input.objectId || randomUUID()}.${extension}`].join('/')
-      : ['users', input.userId, 'thumbnails', `${input.objectId || randomUUID()}.${extension}`].join('/');
+      : input.namespace === 'processed'
+        ? ['users', input.userId, 'processed', String(now.getUTCFullYear()), String(now.getUTCMonth() + 1).padStart(2, '0'), `${input.objectId || randomUUID()}.${extension}`].join('/')
+        : ['users', input.userId, 'thumbnails', `${input.objectId || randomUUID()}.${extension}`].join('/');
 
     try {
       await this.client.send(new PutObjectCommand({

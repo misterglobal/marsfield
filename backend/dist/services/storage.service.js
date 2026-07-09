@@ -74,7 +74,11 @@ function extensionForAsset(sourceUrl, mimeType, assetType) {
         return 'wav';
     if (mimeType?.includes('mp4'))
         return 'mp4';
-    return assetType === 'image' ? 'png' : 'mp4';
+    if (mimeType?.includes('json'))
+        return 'json';
+    if (mimeType?.includes('text'))
+        return 'txt';
+    return assetType === 'image' ? 'png' : assetType === 'document' ? 'json' : 'mp4';
 }
 class StorageService {
     config = parseR2Config();
@@ -148,7 +152,9 @@ class StorageService {
         const now = new Date();
         const key = input.namespace === 'uploads'
             ? ['users', input.userId, 'uploads', String(now.getUTCFullYear()), String(now.getUTCMonth() + 1).padStart(2, '0'), `${input.objectId || (0, crypto_1.randomUUID)()}.${extension}`].join('/')
-            : ['users', input.userId, 'thumbnails', `${input.objectId || (0, crypto_1.randomUUID)()}.${extension}`].join('/');
+            : input.namespace === 'processed'
+                ? ['users', input.userId, 'processed', String(now.getUTCFullYear()), String(now.getUTCMonth() + 1).padStart(2, '0'), `${input.objectId || (0, crypto_1.randomUUID)()}.${extension}`].join('/')
+                : ['users', input.userId, 'thumbnails', `${input.objectId || (0, crypto_1.randomUUID)()}.${extension}`].join('/');
         try {
             await this.client.send(new client_s3_1.PutObjectCommand({
                 Bucket: this.config.bucket,

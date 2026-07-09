@@ -1,5 +1,5 @@
-export type BackendWorkflow = 'text-to-video' | 'image-to-video' | 'lip-sync' | 'text-to-image' | 'multimodal-video' | 'video-edit' | 'video-enhance' | 'image-upscale';
-export type BackendModelFamily = 'general' | 'seedance' | 'nano-banana' | 'recraft' | 'grok-video' | 'kling-edit' | 'video-enhance' | 'image-upscale';
+export type BackendWorkflow = 'text-to-video' | 'image-to-video' | 'lip-sync' | 'text-to-image' | 'multimodal-video' | 'video-edit' | 'video-enhance' | 'image-upscale' | 'video-caption' | 'social-resize';
+export type BackendModelFamily = 'general' | 'seedance' | 'nano-banana' | 'recraft' | 'grok-video' | 'kling-edit' | 'video-enhance' | 'image-upscale' | 'caption' | 'local-processing';
 
 export interface BackendModelDefinition {
   id: string;
@@ -32,6 +32,8 @@ export const MODEL_REGISTRY: readonly BackendModelDefinition[] = [
   { id: 'prunaai/p-image-upscale', workflow: 'image-upscale', family: 'image-upscale', output: 'image' },
   { id: 'google/upscaler', workflow: 'image-upscale', family: 'image-upscale', output: 'image' },
   { id: 'philz1337x/clarity-pro-upscaler', workflow: 'image-upscale', family: 'image-upscale', output: 'image' },
+  { id: 'fictions-ai/autocaption:18a45ff0d95feb4449d192bbdc06b4a6df168fa33def76dfc51b78ae224b599b', workflow: 'video-caption', family: 'caption', output: 'video' },
+  { id: 'local/ffmpeg-social-resize', workflow: 'social-resize', family: 'local-processing', output: 'video' },
 ] as const;
 
 export const getModelDefinition = (id: string) => MODEL_REGISTRY.find((model) => model.id === id);

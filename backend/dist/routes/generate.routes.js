@@ -11,6 +11,7 @@ const asset_service_1 = require("../services/asset.service");
 const media_probe_service_1 = require("../services/media-probe.service");
 const rate_limit_middleware_1 = require("../middleware/rate-limit.middleware");
 const model_registry_1 = require("../config/model-registry");
+const social_resize_service_1 = require("../services/social-resize.service");
 const router = (0, express_1.Router)();
 const prisma = new client_1.PrismaClient();
 const replicateService = new replicate_service_1.ReplicateService();
@@ -117,8 +118,28 @@ router.post('/generate/quote', auth_middleware_1.authMiddleware, (0, auth_middle
                     ? (params.upscale_factor === 'x4' ? 16 : 4)
                     : Number(params.scale_factor ?? 2) ** 2);
         }
+        else if (workflow === 'video-caption' && (0, model_registry_1.getModelDefinition)(model)?.family === 'caption') {
+            const video = await resolveOwnedStorageObject(req.user.id, req.body.video_storage_object_id, 'video/', 'Caption source video');
+            if (!video)
+                throw new Error('Owned video asset required');
+            const duration = await (0, media_probe_service_1.getRemoteVideoDuration)(video);
+            if (duration > 60)
+                throw new Error('Caption clips are limited to 60 seconds');
+            billingParams.duration = duration;
+        }
+        else if (workflow === 'social-resize' && model === 'local/ffmpeg-social-resize') {
+            const video = await resolveOwnedStorageObject(req.user.id, req.body.video_storage_object_id, 'video/', 'Resize source video');
+            if (!video)
+                throw new Error('Owned video asset required');
+            const duration = await (0, media_probe_service_1.getRemoteVideoDuration)(video);
+            if (duration > 180)
+                throw new Error('Social resize clips are limited to 180 seconds');
+            billingParams.duration = duration;
+            billingParams.format = (0, social_resize_service_1.assertSocialResizeFormat)(params.format);
+            billingParams.mode = (0, social_resize_service_1.assertSocialResizeMode)(params.mode);
+        }
         else {
-            throw new Error('Exact quotes are available for enhancement workflows');
+            throw new Error('Exact quotes are available for enhancement, caption, and social resize workflows');
         }
         const quote = (0, billing_service_1.quoteGeneration)({ workflow, model, params: billingParams });
         res.json({
@@ -152,7 +173,7 @@ router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1
             return;
         }
         // Validate workflow
-        const validWorkflows = ['text-to-video', 'image-to-video', 'lip-sync', 'text-to-image', 'multi-image-video', 'multimodal-video', 'character-replace', 'video-edit', 'video-enhance', 'image-upscale'];
+        const validWorkflows = ['text-to-video', 'image-to-video', 'lip-sync', 'text-to-image', 'multi-image-video', 'multimodal-video', 'character-replace', 'video-edit', 'video-enhance', 'image-upscale', 'video-caption', 'social-resize'];
         if (!validWorkflows.includes(workflow)) {
             res.status(400).json({ error: 'Invalid workflow type' });
             return;
@@ -163,7 +184,7 @@ router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1
             return;
         }
         // Validate model string (prevent injection)
-        if (!/^[\w\-\.\/]+$/.test(model)) {
+        if (!/^[\w\-\.\/:]+$/.test(model)) {
             res.status(400).json({ error: 'Invalid model identifier' });
             return;
         }
@@ -380,6 +401,80 @@ router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1
                     fast_mode: model === 'bytedance/omni-human-1.5' ? params?.fast_mode === true : undefined,
                 };
             }
+            else if (workflow === 'video-caption') {
+                const video = await resolveOwnedStorageObject(user.id, req.body.video_storage_object_id, 'video/', 'Caption source video');
+                if (!video)
+                    throw new Error('Captioning requires an owned video asset');
+                const sourceDuration = await (0, media_probe_service_1.getRemoteVideoDuration)(video);
+                if (sourceDuration > 60)
+                    throw new Error('Caption clips are limited to 60 seconds');
+                const font = String(params?.font || 'Poppins/Poppins-ExtraBold.ttf');
+                const allowedFonts = ['Poppins/Poppins-ExtraBold.ttf', 'Arial.ttf'];
+                const subsPosition = String(params?.subs_position || 'bottom75');
+                const fontsize = Number(params?.fontsize ?? 4);
+                const maxChars = Number(params?.MaxChars ?? 10);
+                const opacity = Number(params?.opacity ?? 0);
+                const strokeWidth = Number(params?.stroke_width ?? 2.6);
+                const kerning = Number(params?.kerning ?? -5);
+                const safeColor = (value, fallback) => {
+                    const color = String(value || fallback).trim();
+                    if (!/^(#[0-9a-f]{6}|[a-z]{3,20})$/i.test(color))
+                        throw new Error('Caption colors must be a color name or six-digit hex value');
+                    return color;
+                };
+                if (!allowedFonts.includes(font))
+                    throw new Error('Unsupported caption font');
+                if (!['bottom75', 'bottom', 'top', 'center', 'left', 'right'].includes(subsPosition))
+                    throw new Error('Unsupported caption position');
+                if (!Number.isFinite(fontsize) || fontsize < 2 || fontsize > 12)
+                    throw new Error('Caption font size must be from 2 to 12');
+                if (!Number.isInteger(maxChars) || maxChars < 5 || maxChars > 40)
+                    throw new Error('Maximum caption characters must be from 5 to 40');
+                if (!Number.isFinite(opacity) || opacity < 0 || opacity > 1)
+                    throw new Error('Caption background opacity must be from 0 to 1');
+                if (!Number.isFinite(strokeWidth) || strokeWidth < 0 || strokeWidth > 8)
+                    throw new Error('Caption stroke width must be from 0 to 8');
+                if (!Number.isFinite(kerning) || kerning < -10 || kerning > 10)
+                    throw new Error('Caption kerning must be from -10 to 10');
+                billingParams.duration = sourceDuration;
+                predictionInput = {
+                    video_file_input: video,
+                    output_video: true,
+                    output_transcript: true,
+                    subs_position: subsPosition,
+                    color: safeColor(params?.color, 'white'),
+                    highlight_color: safeColor(params?.highlight_color, 'yellow'),
+                    fontsize,
+                    MaxChars: maxChars,
+                    opacity,
+                    font,
+                    stroke_color: safeColor(params?.stroke_color, 'black'),
+                    stroke_width: strokeWidth,
+                    kerning,
+                    right_to_left: params?.right_to_left === true,
+                    translate: params?.translate === true,
+                };
+            }
+            else if (workflow === 'social-resize') {
+                const video = await resolveOwnedStorageObject(user.id, req.body.video_storage_object_id, 'video/', 'Resize source video');
+                if (!video)
+                    throw new Error('Social resize requires an owned video asset');
+                const sourceDuration = await (0, media_probe_service_1.getRemoteVideoDuration)(video);
+                if (sourceDuration > 180)
+                    throw new Error('Social resize clips are limited to 180 seconds');
+                const format = (0, social_resize_service_1.assertSocialResizeFormat)(params?.format);
+                const mode = (0, social_resize_service_1.assertSocialResizeMode)(params?.mode);
+                billingParams.duration = sourceDuration;
+                billingParams.format = format;
+                billingParams.mode = mode;
+                billingParams.variations = 1;
+                predictionInput = {
+                    source_video: video,
+                    format,
+                    mode,
+                    aspect_ratio: (0, social_resize_service_1.socialResizeLabel)(format),
+                };
+            }
             else if (workflow === 'text-to-image') {
                 if (!IMAGE_MODELS.has(model))
                     throw new Error('Unsupported image generation model');
@@ -532,6 +627,75 @@ router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1
                 return;
             }
         }
+        if (workflow === 'social-resize') {
+            const sourceVideo = String(predictionInput.source_video || '');
+            const format = (0, social_resize_service_1.assertSocialResizeFormat)(predictionInput.format);
+            const mode = (0, social_resize_service_1.assertSocialResizeMode)(predictionInput.mode);
+            const prediction = await prisma.prediction.create({
+                data: {
+                    userId: user.id,
+                    projectId,
+                    storyboardSceneId,
+                    workflow,
+                    model,
+                    prompt: `Resize video for ${(0, social_resize_service_1.socialResizeLabel)(format)} (${mode})`,
+                    inputParams: {
+                        format,
+                        mode,
+                        aspect_ratio: (0, social_resize_service_1.socialResizeLabel)(format),
+                        source_video_storage_object_id: req.body.video_storage_object_id,
+                    },
+                    variationIndex: 0,
+                    variationCount: 1,
+                    creditCost: 0,
+                    status: 'processing',
+                },
+            });
+            try {
+                const outputBuffer = await (0, social_resize_service_1.renderSocialResize)({ sourceUrl: sourceVideo, format, mode });
+                const asset = await (0, asset_service_1.createAssetFromBufferForPrediction)(prediction, outputBuffer, {
+                    mimeType: 'video/mp4',
+                    assetType: 'video',
+                    originalName: `social-resize-${format}-${mode}.mp4`,
+                    metadata: { workflow, format, mode },
+                });
+                const completedPrediction = await prisma.prediction.update({
+                    where: { id: prediction.id },
+                    data: { status: 'succeeded', outputUrl: asset.url, completedAt: new Date() },
+                });
+                await prisma.usageEvent.create({
+                    data: {
+                        userId: user.id,
+                        predictionId: prediction.id,
+                        eventType: 'generation',
+                        credits: 0,
+                        metadata: { workflow, model, format, mode },
+                    },
+                });
+                res.status(201).json({
+                    id: completedPrediction.id,
+                    status: completedPrediction.status,
+                    output_url: completedPrediction.outputUrl,
+                    created_at: completedPrediction.createdAt,
+                    credits_charged: 0,
+                    variation_group_id: null,
+                    predictions: [{
+                            id: completedPrediction.id,
+                            status: completedPrediction.status,
+                            output_url: completedPrediction.outputUrl,
+                            variation_index: 0,
+                        }],
+                });
+            }
+            catch (error) {
+                await prisma.prediction.update({
+                    where: { id: prediction.id },
+                    data: { status: 'failed', errorMessage: error instanceof Error ? error.message : 'Social resize failed', completedAt: new Date() },
+                });
+                throw error;
+            }
+            return;
+        }
         // Call replicate client wrapper
         const webhookBaseUrl = process.env.WEBHOOK_BASE_URL;
         const webhookUrl = webhookBaseUrl?.startsWith('https://')
@@ -599,6 +763,9 @@ router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1
             else if (repPrediction.outputUrl) {
                 // Create user asset immediately if succeeded synchronously
                 await (0, asset_service_1.createAssetForPrediction)(prediction, repPrediction.outputUrl);
+                if (workflow === 'video-caption' && repPrediction.outputUrls?.[1]) {
+                    await (0, asset_service_1.createSupplementaryAssetForPrediction)(prediction, repPrediction.outputUrls[1], 'document');
+                }
             }
         }
         await prisma.$transaction([

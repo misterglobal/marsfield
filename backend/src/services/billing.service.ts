@@ -28,6 +28,8 @@ function parseVariationCount(params?: Record<string, unknown>): number {
 }
 
 function getBaseCredits(input: GenerationBillingInput): number {
+  if (input.workflow === 'social-resize') return 0;
+  if (input.workflow === 'video-caption') return 4;
   if (input.workflow === 'image-upscale') {
     if (input.model === 'google/upscaler') return 1;
     const outputMegapixels = Number(input.params?.output_megapixels || 0);
@@ -103,6 +105,14 @@ function getBaseCredits(input: GenerationBillingInput): number {
 export function quoteGeneration(input: GenerationBillingInput): GenerationBillingQuote {
   const baseCredits = getBaseCredits(input);
   const variationCount = parseVariationCount(input.params);
+  if (baseCredits === 0) {
+    return {
+      baseCredits,
+      variationCount: 1,
+      variationCredits: 0,
+      totalCredits: 0,
+    };
+  }
   const additionalOutputCredits = input.model === 'google/nano-banana-pro'
     ? baseCredits
     : Math.ceil(baseCredits * 0.75);
