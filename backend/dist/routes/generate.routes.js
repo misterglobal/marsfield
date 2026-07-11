@@ -21,7 +21,7 @@ const IMAGE_MODELS = new Set(['general', 'nano-banana', 'recraft'].flatMap((fami
 const VIDEO_ENHANCEMENT_MODELS = (0, model_registry_1.modelIdsForFamily)('video-enhance');
 const IMAGE_UPSCALE_MODELS = (0, model_registry_1.modelIdsForFamily)('image-upscale');
 const KLING_REFERENCE_MIN_SECONDS = 3;
-const KLING_REFERENCE_MAX_SECONDS = 9.95;
+const KLING_REFERENCE_MAX_SECONDS = 9.8;
 function decodeFileInput(value, maximumBytes) {
     if (typeof value !== 'string') {
         throw new Error('Reference inputs must be URLs or data URIs');
@@ -273,7 +273,7 @@ router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1
                 }
                 const referenceDuration = await (0, media_probe_service_1.getRemoteVideoDuration)(referenceVideo);
                 if (referenceDuration < KLING_REFERENCE_MIN_SECONDS || referenceDuration >= KLING_REFERENCE_MAX_SECONDS) {
-                    throw new Error(`Reference video must be at least 3 seconds and safely under 10 seconds (received ${referenceDuration.toFixed(2)}s)`);
+                    throw new Error(`Reference video must be at least 3 seconds and no more than 9.8 seconds to avoid Kling's 10-second provider limit (received ${referenceDuration.toFixed(2)}s)`);
                 }
                 const mode = params?.mode || 'pro';
                 if (!['standard', 'pro'].includes(mode))

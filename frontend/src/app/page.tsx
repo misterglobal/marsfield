@@ -51,7 +51,7 @@ const KLING_EDIT_PRESETS = [
 ] as const;
 
 const KLING_REFERENCE_MIN_SECONDS = 3;
-const KLING_REFERENCE_MAX_SECONDS = 9.95;
+const KLING_REFERENCE_MAX_SECONDS = 9.8;
 
 export default function StudioPage() {
   const { user, token } = useAuth();
@@ -418,7 +418,7 @@ export default function StudioPage() {
       setGenerationError('');
       const measured = await readVideoDuration(file);
       if (measured < KLING_REFERENCE_MIN_SECONDS || measured >= KLING_REFERENCE_MAX_SECONDS) {
-        throw new Error(`Reference video must be at least 3 seconds and safely under 10 seconds. This video is ${measured.toFixed(2)} seconds.`);
+        throw new Error(`Reference video must be at least 3 seconds and no more than 9.8 seconds to avoid Kling's 10-second provider limit. This video is ${measured.toFixed(2)} seconds.`);
       }
       setReferenceVideoDuration(measured);
       setReferenceVideos(await uploadReferenceFiles(files, 1, 'video'));
