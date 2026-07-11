@@ -20,6 +20,8 @@ const NANO_BANANA_MODELS = (0, model_registry_1.modelIdsForFamily)('nano-banana'
 const IMAGE_MODELS = new Set(['general', 'nano-banana', 'recraft'].flatMap((family) => Array.from((0, model_registry_1.modelIdsForFamily)(family))).filter((id) => (0, model_registry_1.getModelDefinition)(id)?.workflow === 'text-to-image'));
 const VIDEO_ENHANCEMENT_MODELS = (0, model_registry_1.modelIdsForFamily)('video-enhance');
 const IMAGE_UPSCALE_MODELS = (0, model_registry_1.modelIdsForFamily)('image-upscale');
+const KLING_REFERENCE_MIN_SECONDS = 3;
+const KLING_REFERENCE_MAX_SECONDS = 9.95;
 function decodeFileInput(value, maximumBytes) {
     if (typeof value !== 'string') {
         throw new Error('Reference inputs must be URLs or data URIs');
@@ -270,8 +272,8 @@ router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1
                     throw new Error('Video editing requires a prompt no longer than 2500 characters');
                 }
                 const referenceDuration = await (0, media_probe_service_1.getRemoteVideoDuration)(referenceVideo);
-                if (referenceDuration < 3 || referenceDuration > 10.05) {
-                    throw new Error(`Reference video must be between 3 and 10 seconds (received ${referenceDuration.toFixed(1)}s)`);
+                if (referenceDuration < KLING_REFERENCE_MIN_SECONDS || referenceDuration >= KLING_REFERENCE_MAX_SECONDS) {
+                    throw new Error(`Reference video must be at least 3 seconds and safely under 10 seconds (received ${referenceDuration.toFixed(2)}s)`);
                 }
                 const mode = params?.mode || 'pro';
                 if (!['standard', 'pro'].includes(mode))

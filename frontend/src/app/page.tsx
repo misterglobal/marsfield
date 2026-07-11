@@ -50,6 +50,9 @@ const KLING_EDIT_PRESETS = [
   { id: 'camera', label: 'Alternate camera treatment', prompt: 'Reinterpret <<<video_1>>> with the described camera treatment while preserving the subjects, action, timing, location, and continuity.' },
 ] as const;
 
+const KLING_REFERENCE_MIN_SECONDS = 3;
+const KLING_REFERENCE_MAX_SECONDS = 9.95;
+
 export default function StudioPage() {
   const { user, token } = useAuth();
   const [workflow, setWorkflow] = useState('text-to-video');
@@ -414,8 +417,8 @@ export default function StudioPage() {
     try {
       setGenerationError('');
       const measured = await readVideoDuration(file);
-      if (measured < 3 || measured > 10.05) {
-        throw new Error(`Reference video must be between 3 and 10 seconds. This video is ${measured.toFixed(1)} seconds.`);
+      if (measured < KLING_REFERENCE_MIN_SECONDS || measured >= KLING_REFERENCE_MAX_SECONDS) {
+        throw new Error(`Reference video must be at least 3 seconds and safely under 10 seconds. This video is ${measured.toFixed(2)} seconds.`);
       }
       setReferenceVideoDuration(measured);
       setReferenceVideos(await uploadReferenceFiles(files, 1, 'video'));
@@ -490,10 +493,12 @@ export default function StudioPage() {
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 10 * 1024 * 1024) { // 10MB limit
         setGenerationError('Image must be smaller than 10MB');
+        input.value = '';
         return;
       }
       setImageFile(file);
@@ -509,15 +514,18 @@ export default function StudioPage() {
         setGenerationError(error instanceof Error ? error.message : 'Image upload failed');
       } finally {
         setUploadProgress(null);
+        input.value = '';
       }
     }
   };
 
   const handleAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 50 * 1024 * 1024) { // 50MB limit for audio
         setGenerationError('Audio file must be smaller than 50MB');
+        input.value = '';
         return;
       }
       setAudioFile(file);
@@ -533,6 +541,7 @@ export default function StudioPage() {
         setGenerationError(error instanceof Error ? error.message : 'Audio upload failed');
       } finally {
         setUploadProgress(null);
+        input.value = '';
       }
     }
   };
@@ -777,7 +786,7 @@ export default function StudioPage() {
       }
     }
     if (workflow === 'video-edit' && !referenceVideos[0]) {
-      setGenerationError('Please upload a 3–10 second source video. Reference images are optional unless your prompt uses one.');
+      setGenerationError('Please upload a source video that is at least 3 seconds and safely under 10 seconds. Reference images are optional unless your prompt uses one.');
       return;
     }
     if ((isVideoEnhance || isImageUpscale || isSocialResize) && enhancementQuote === null) {
@@ -1217,7 +1226,7 @@ export default function StudioPage() {
                 </p>
               </div>
               <label style={{ border: '2px dashed var(--panel-border)', borderRadius: '12px', padding: '1rem', cursor: 'pointer', background: referenceImages.length ? 'rgba(139, 92, 246, 0.08)' : 'rgba(255, 255, 255, 0.02)' }}>
-                <input type="file" multiple accept="image/jpeg,image/png,image/webp" onChange={(event) => void handleCharacterImageUpload(event.target.files)} style={{ display: 'none' }} />
+                <input type="file" multiple accept="image/jpeg,image/png,image/webp" onChange={(event) => { const input = event.currentTarget; const files = input.files; void handleCharacterImageUpload(files).finally(() => { input.value = ''; }); }} style={{ display: 'none' }} />
                 <strong style={{ display: 'block' }}>{referenceImages.length ? referenceImages.map((image) => image.name).join(', ') : 'Choose up to four reference images'}</strong>
                 <span style={{ color: 'var(--foreground-muted)', fontSize: '0.75rem' }}>Maximum 10 MB each</span>
               </label>
@@ -1229,7 +1238,7 @@ export default function StudioPage() {
                 </p>
               </div>
               <label style={{ border: '2px dashed var(--panel-border)', borderRadius: '12px', padding: '1rem', cursor: 'pointer', background: referenceVideos.length ? 'rgba(139, 92, 246, 0.08)' : 'rgba(255, 255, 255, 0.02)' }}>
-                <input type="file" accept="video/mp4,video/quicktime" onChange={(event) => void handleCharacterVideoUpload(event.target.files)} style={{ display: 'none' }} />
+                <input type="file" accept="video/mp4,video/quicktime" onChange={(event) => { const input = event.currentTarget; const files = input.files; void handleCharacterVideoUpload(files).finally(() => { input.value = ''; }); }} style={{ display: 'none' }} />
                 <strong style={{ display: 'block' }}>{referenceVideos[0]?.name || 'Choose 3–10 second video'}</strong>
                 <span style={{ color: 'var(--foreground-muted)', fontSize: '0.75rem' }}>
                   {referenceVideoDuration ? `${referenceVideoDuration.toFixed(1)} seconds` : 'Maximum 200 MB'}
@@ -1247,7 +1256,7 @@ export default function StudioPage() {
                 </p>
               </div>
               <label style={{ border: '2px dashed var(--panel-border)', borderRadius: '12px', padding: '1rem', cursor: 'pointer', background: referenceVideos.length ? 'rgba(139, 92, 246, 0.08)' : 'rgba(255, 255, 255, 0.02)' }}>
-                <input type="file" accept={model === 'xai/grok-imagine-video-extension' ? 'video/mp4' : 'video/mp4,video/quicktime,video/webm'} onChange={(event) => void handleEnhanceVideoUpload(event.target.files)} style={{ display: 'none' }} />
+                <input type="file" accept={model === 'xai/grok-imagine-video-extension' ? 'video/mp4' : 'video/mp4,video/quicktime,video/webm'} onChange={(event) => { const input = event.currentTarget; const files = input.files; void handleEnhanceVideoUpload(files).finally(() => { input.value = ''; }); }} style={{ display: 'none' }} />
                 <strong style={{ display: 'block' }}>{referenceVideos[0]?.name || 'Choose source video'}</strong>
                 <span style={{ color: 'var(--foreground-muted)', fontSize: '0.75rem' }}>
                   {referenceVideoDuration ? `${referenceVideoDuration.toFixed(1)} seconds` : 'Maximum 200 MB'}
@@ -1263,7 +1272,7 @@ export default function StudioPage() {
                 <p style={{ color: 'var(--foreground-muted)', fontSize: '0.82rem', margin: 0 }}>Add styled, karaoke-style captions to a clip up to 60 seconds. The captioned video and editable transcript are saved to your Library.</p>
               </div>
               <label style={{ border: '2px dashed var(--panel-border)', borderRadius: '12px', padding: '1rem', cursor: 'pointer', background: referenceVideos.length ? 'rgba(139, 92, 246, 0.08)' : 'rgba(255, 255, 255, 0.02)' }}>
-                <input type="file" accept="video/mp4,video/quicktime,video/webm" onChange={(event) => void handleCaptionVideoUpload(event.target.files)} style={{ display: 'none' }} />
+                <input type="file" accept="video/mp4,video/quicktime,video/webm" onChange={(event) => { const input = event.currentTarget; const files = input.files; void handleCaptionVideoUpload(files).finally(() => { input.value = ''; }); }} style={{ display: 'none' }} />
                 <strong style={{ display: 'block' }}>{referenceVideos[0]?.name || 'Choose video to caption'}</strong>
                 <span style={{ color: 'var(--foreground-muted)', fontSize: '0.75rem' }}>{referenceVideoDuration ? `${referenceVideoDuration.toFixed(1)} seconds` : 'Maximum 60 seconds / 200 MB'}</span>
               </label>
@@ -1307,7 +1316,7 @@ export default function StudioPage() {
                 </p>
               </div>
               <label style={{ border: '2px dashed var(--panel-border)', borderRadius: '12px', padding: '1rem', cursor: 'pointer', background: referenceVideos.length ? 'rgba(139, 92, 246, 0.08)' : 'rgba(255, 255, 255, 0.02)' }}>
-                <input type="file" accept="video/mp4,video/quicktime,video/webm" onChange={(event) => void handleSocialResizeVideoUpload(event.target.files)} style={{ display: 'none' }} />
+                <input type="file" accept="video/mp4,video/quicktime,video/webm" onChange={(event) => { const input = event.currentTarget; const files = input.files; void handleSocialResizeVideoUpload(files).finally(() => { input.value = ''; }); }} style={{ display: 'none' }} />
                 <strong style={{ display: 'block' }}>{referenceVideos[0]?.name || 'Choose video to resize'}</strong>
                 <span style={{ color: 'var(--foreground-muted)', fontSize: '0.75rem' }}>{referenceVideoDuration ? `${referenceVideoDuration.toFixed(1)} seconds` : 'Maximum 180 seconds / 200 MB'}</span>
               </label>

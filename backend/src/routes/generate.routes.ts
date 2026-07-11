@@ -21,6 +21,8 @@ const IMAGE_MODELS = new Set(['general', 'nano-banana', 'recraft'].flatMap((fami
 ).filter((id) => getModelDefinition(id)?.workflow === 'text-to-image'));
 const VIDEO_ENHANCEMENT_MODELS = modelIdsForFamily('video-enhance');
 const IMAGE_UPSCALE_MODELS = modelIdsForFamily('image-upscale');
+const KLING_REFERENCE_MIN_SECONDS = 3;
+const KLING_REFERENCE_MAX_SECONDS = 9.95;
 
 function decodeFileInput(value: unknown, maximumBytes: number): string | Blob {
   if (typeof value !== 'string') {
@@ -294,8 +296,8 @@ router.post('/generate', authMiddleware, requireScope('generation:write'), rateL
           throw new Error('Video editing requires a prompt no longer than 2500 characters');
         }
         const referenceDuration = await getRemoteVideoDuration(referenceVideo);
-        if (referenceDuration < 3 || referenceDuration > 10.05) {
-          throw new Error(`Reference video must be between 3 and 10 seconds (received ${referenceDuration.toFixed(1)}s)`);
+        if (referenceDuration < KLING_REFERENCE_MIN_SECONDS || referenceDuration >= KLING_REFERENCE_MAX_SECONDS) {
+          throw new Error(`Reference video must be at least 3 seconds and safely under 10 seconds (received ${referenceDuration.toFixed(2)}s)`);
         }
         const mode = params?.mode || 'pro';
         if (!['standard', 'pro'].includes(mode)) throw new Error('Kling mode must be standard or pro');
