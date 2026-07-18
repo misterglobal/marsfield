@@ -91,6 +91,18 @@ export const api = {
   toggleFavorite: (id: string) => request(`/assets/${id}/favorite`, {
     method: 'POST',
   }),
+  getVideoPackagingIdeas: (id: string, payload: any = {}) => request(`/assets/${id}/packaging/ideas`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  createVideoThumbnailStills: (id: string, payload: any = {}) => request(`/assets/${id}/packaging/thumbnails`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  createTitleOverlay: (id: string, payload: any) => request(`/assets/${id}/packaging/title-overlay`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
   quoteGeneration: (payload: any) => request('/generate/quote', {
     method: 'POST',
     body: JSON.stringify(payload),

@@ -4,6 +4,8 @@ const express_1 = require("express");
 const client_1 = require("@prisma/client");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const storage_service_1 = require("../services/storage.service");
+const asset_service_1 = require("../services/asset.service");
+const video_packaging_service_1 = require("../services/video-packaging.service");
 const router = (0, express_1.Router)();
 const prisma = new client_1.PrismaClient();
 function isAssetDeleteEnabledForUser(email) {
@@ -126,6 +128,178 @@ router.post('/:id/favorite', auth_middleware_1.authMiddleware, (0, auth_middlewa
     catch (error) {
         console.error('Toggle favorite asset error:', error);
         res.status(500).json({ error: 'Failed toggling asset favorite state' });
+    }
+});
+async function findOwnedDurableVideoAsset(id, userId) {
+    return prisma.asset.findFirst({
+        where: { id, userId, type: 'video', storageObjectId: { not: null } },
+        include: {
+            prediction: { select: { prompt: true, workflow: true, model: true } },
+            project: { select: { id: true, name: true } },
+        },
+    });
+}
+// POST /api/v1/assets/:id/packaging/ideas
+router.post('/:id/packaging/ideas', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('assets:read'), async (req, res) => {
+    try {
+        const user = req.user;
+        if (!user) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+        const asset = await findOwnedDurableVideoAsset(req.params.id, user.id);
+        if (!asset) {
+            res.status(404).json({ error: 'Video asset not found' });
+            return;
+        }
+        const context = [
+            typeof req.body?.context === 'string' ? req.body.context : '',
+            asset.prediction?.prompt || '',
+            asset.project?.name ? `Project: ${asset.project.name}` : '',
+        ].filter(Boolean).join(' ');
+        res.json((0, video_packaging_service_1.generateVideoPackagingIdeas)(context));
+    }
+    catch (error) {
+        console.error('Video packaging ideas error:', error);
+        res.status(500).json({ error: 'Failed generating packaging ideas' });
+    }
+});
+// POST /api/v1/assets/:id/packaging/thumbnails
+router.post('/:id/packaging/thumbnails', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('assets:write'), async (req, res) => {
+    try {
+        const user = req.user;
+        if (!user) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+        const asset = await findOwnedDurableVideoAsset(req.params.id, user.id);
+        if (!asset) {
+            res.status(404).json({ error: 'Video asset not found' });
+            return;
+        }
+        const times = await (0, video_packaging_service_1.thumbnailCandidateTimes)(asset.url, req.body?.times);
+        const createdAssets = [];
+        for (let index = 0; index < times.length; index++) {
+            const time = times[index];
+            const prediction = await prisma.prediction.create({
+                data: {
+                    userId: user.id,
+                    projectId: asset.projectId,
+                    workflow: 'thumbnail-stills',
+                    model: 'local/ffmpeg-thumbnail-stills',
+                    prompt: `Thumbnail still at ${time}s`,
+                    inputParams: { source_asset_id: asset.id, time_seconds: time },
+                    creditCost: 0,
+                    status: 'processing',
+                },
+            });
+            try {
+                const buffer = await (0, video_packaging_service_1.extractThumbnailStill)({ sourceUrl: asset.url, timeSeconds: time });
+                const created = await (0, asset_service_1.createAssetFromBufferForPrediction)(prediction, buffer, {
+                    mimeType: 'image/jpeg',
+                    assetType: 'image',
+                    originalName: `thumbnail-still-${index + 1}.jpg`,
+                    metadata: {
+                        workflow: 'thumbnail-stills',
+                        sourceAssetId: asset.id,
+                        timeSeconds: String(time),
+                    },
+                });
+                await prisma.prediction.update({
+                    where: { id: prediction.id },
+                    data: { status: 'succeeded', outputUrl: created.url, completedAt: new Date() },
+                });
+                await prisma.usageEvent.create({
+                    data: {
+                        userId: user.id,
+                        predictionId: prediction.id,
+                        eventType: 'generation_completed',
+                        credits: 0,
+                        metadata: { workflow: 'thumbnail-stills', source_asset_id: asset.id, time_seconds: time },
+                    },
+                });
+                createdAssets.push({ ...created, time_seconds: time });
+            }
+            catch (error) {
+                await prisma.prediction.update({
+                    where: { id: prediction.id },
+                    data: { status: 'failed', errorMessage: error instanceof Error ? error.message : 'Thumbnail extraction failed', completedAt: new Date() },
+                });
+                throw error;
+            }
+        }
+        res.status(201).json({ assets: createdAssets });
+    }
+    catch (error) {
+        console.error('Video thumbnail stills error:', error);
+        res.status(400).json({ error: error instanceof Error ? error.message : 'Failed creating thumbnail stills' });
+    }
+});
+// POST /api/v1/assets/:id/packaging/title-overlay
+router.post('/:id/packaging/title-overlay', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('assets:write'), async (req, res) => {
+    try {
+        const user = req.user;
+        if (!user) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+        const asset = await findOwnedDurableVideoAsset(req.params.id, user.id);
+        if (!asset) {
+            res.status(404).json({ error: 'Video asset not found' });
+            return;
+        }
+        const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+        const subtitle = typeof req.body?.subtitle === 'string' ? req.body.subtitle.trim() : '';
+        if (!title) {
+            res.status(400).json({ error: 'Title is required' });
+            return;
+        }
+        const prediction = await prisma.prediction.create({
+            data: {
+                userId: user.id,
+                projectId: asset.projectId,
+                workflow: 'title-overlay',
+                model: 'local/ffmpeg-title-overlay',
+                prompt: title,
+                inputParams: { source_asset_id: asset.id, title, subtitle },
+                creditCost: 0,
+                status: 'processing',
+            },
+        });
+        try {
+            const buffer = await (0, video_packaging_service_1.renderTitleOverlayVideo)({ sourceUrl: asset.url, title, subtitle });
+            const created = await (0, asset_service_1.createAssetFromBufferForPrediction)(prediction, buffer, {
+                mimeType: 'video/mp4',
+                assetType: 'video',
+                originalName: 'title-overlay.mp4',
+                metadata: { workflow: 'title-overlay', sourceAssetId: asset.id },
+            });
+            await prisma.prediction.update({
+                where: { id: prediction.id },
+                data: { status: 'succeeded', outputUrl: created.url, completedAt: new Date() },
+            });
+            await prisma.usageEvent.create({
+                data: {
+                    userId: user.id,
+                    predictionId: prediction.id,
+                    eventType: 'generation_completed',
+                    credits: 0,
+                    metadata: { workflow: 'title-overlay', source_asset_id: asset.id },
+                },
+            });
+            res.status(201).json({ id: prediction.id, status: 'succeeded', output_url: created.url, asset_id: created.id, credits_charged: 0 });
+        }
+        catch (error) {
+            await prisma.prediction.update({
+                where: { id: prediction.id },
+                data: { status: 'failed', errorMessage: error instanceof Error ? error.message : 'Title overlay render failed', completedAt: new Date() },
+            });
+            throw error;
+        }
+    }
+    catch (error) {
+        console.error('Video title overlay error:', error);
+        res.status(400).json({ error: error instanceof Error ? error.message : 'Failed creating title overlay' });
     }
 });
 // DELETE /api/v1/assets/:id
