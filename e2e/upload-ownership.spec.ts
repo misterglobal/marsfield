@@ -97,3 +97,46 @@ test('builds a general Kling edit from a preset and owned source video', async (
   expect(submittedBody.params.reference_video_id).toBe('storage-video');
   expect(submittedBody.params.video_reference_type).toBeUndefined();
 });
+
+test('submits Pruna avatar lip-sync with owned portrait and audio', async ({ page }) => {
+  let submittedBody: any;
+  await authenticate(page);
+  await mockApi(page, {
+    'GET /api/v1/assets': [
+      {
+        id: 'asset-portrait', storageObjectId: 'storage-portrait', url: 'https://media.test/portrait.png',
+        thumbnailUrl: 'https://media.test/portrait-thumb.webp', type: 'image', prediction: null,
+      },
+      {
+        id: 'asset-audio', storageObjectId: 'storage-audio', url: 'https://media.test/voice.mp3',
+        thumbnailUrl: null, type: 'audio', prediction: null,
+      },
+    ],
+    'POST /api/v1/generate': async (route) => {
+      submittedBody = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ id: 'avatar-1', status: 'succeeded', output_url: 'https://media.test/avatar.mp4' }),
+      });
+    },
+  });
+
+  await page.goto('/');
+  await page.getByRole('button', { name: /Lip Sync/ }).click();
+  await page.locator('label', { hasText: 'AI Engine Model' }).locator('..').locator('select').selectOption('prunaai/p-video-avatar');
+  await page.getByRole('button', { name: /Uploaded image/ }).click();
+  await page.getByRole('button', { name: /Uploaded audio/ }).click();
+  await page.locator('label', { hasText: 'Resolution' }).locator('..').locator('select').selectOption('1080p');
+  await page.locator('textarea').fill('Warm presenter speaking naturally to camera.');
+  await page.getByRole('button', { name: /Generate Output/ }).click();
+  await expect(page.getByText(/Generation Complete/)).toBeVisible();
+
+  expect(submittedBody).toMatchObject({
+    workflow: 'lip-sync',
+    model: 'prunaai/p-video-avatar',
+    image_storage_object_id: 'storage-portrait',
+    audio_storage_object_id: 'storage-audio',
+    prompt: 'Warm presenter speaking naturally to camera.',
+    params: { resolution: '1080p' },
+  });
+});

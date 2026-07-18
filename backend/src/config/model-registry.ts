@@ -17,6 +17,7 @@ export const MODEL_REGISTRY: readonly BackendModelDefinition[] = [
   { id: 'minimax/hailuo-live', workflow: 'image-to-video', family: 'general', output: 'video' },
   { id: 'bytedance/omni-human', workflow: 'lip-sync', family: 'general', output: 'video' },
   { id: 'bytedance/omni-human-1.5', workflow: 'lip-sync', family: 'general', output: 'video' },
+  { id: 'prunaai/p-video-avatar', workflow: 'lip-sync', family: 'general', output: 'video' },
   { id: 'black-forest-labs/flux-schnell', workflow: 'text-to-image', family: 'general', output: 'image' },
   { id: 'stability-ai/stable-diffusion-3', workflow: 'text-to-image', family: 'general', output: 'image' },
   { id: 'google/nano-banana-2', workflow: 'text-to-image', family: 'nano-banana', output: 'image' },

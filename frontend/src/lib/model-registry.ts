@@ -38,6 +38,7 @@ export const MODEL_REGISTRY: readonly ModelDefinition[] = [
   { id: 'minimax/hailuo-live', name: 'Hailuo Live', workflow: 'image-to-video', family: 'general', speed: 'Cinematic', output: 'video', supportsCinematic: true },
   { id: 'bytedance/omni-human', name: 'OmniHuman V1', workflow: 'lip-sync', family: 'general', speed: 'High Fidelity', output: 'video' },
   { id: 'bytedance/omni-human-1.5', name: 'OmniHuman 1.5', workflow: 'lip-sync', family: 'general', speed: 'Latest', output: 'video' },
+  { id: 'prunaai/p-video-avatar', name: 'P-Video Avatar', workflow: 'lip-sync', family: 'general', speed: 'Fast + Low Cost', output: 'video' },
   { id: 'black-forest-labs/flux-schnell', name: 'Flux Schnell', workflow: 'text-to-image', family: 'general', speed: 'Speed', output: 'image', supportsCinematic: true },
   { id: 'stability-ai/stable-diffusion-3', name: 'Stable Diffusion 3', workflow: 'text-to-image', family: 'general', speed: 'Accurate', output: 'image', supportsCinematic: true },
   { id: 'google/nano-banana-2', name: 'Nano Banana 2', workflow: 'text-to-image', family: 'nano-banana', speed: 'Fast + Editing', output: 'image', supportsCinematic: true },

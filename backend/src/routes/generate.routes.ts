@@ -393,16 +393,30 @@ router.post('/generate', authMiddleware, requireScope('generation:write'), rateL
         const image = await resolveOwnedStorageObject(user.id, req.body.image_storage_object_id, 'image/', 'Lip-sync image');
         const audio = await resolveOwnedStorageObject(user.id, req.body.audio_storage_object_id, 'audio/', 'Lip-sync audio');
         if (!image || !audio) throw new Error('Lip-sync requires a stored image and audio file');
-        if (!['bytedance/omni-human', 'bytedance/omni-human-1.5'].includes(model)) {
+        if (!['bytedance/omni-human', 'bytedance/omni-human-1.5', 'prunaai/p-video-avatar'].includes(model)) {
           throw new Error('Selected model does not support uploaded image and audio lip-sync');
         }
-        predictionInput = {
-          image,
-          audio,
-          prompt: model === 'bytedance/omni-human-1.5' ? prompt || undefined : undefined,
-          seed: Number.isInteger(params?.seed) ? params.seed : undefined,
-          fast_mode: model === 'bytedance/omni-human-1.5' ? params?.fast_mode === true : undefined,
-        };
+        if (model === 'prunaai/p-video-avatar') {
+          const resolution = params?.resolution || '720p';
+          if (!['720p', '1080p'].includes(resolution)) throw new Error('P-Video Avatar resolution must be 720p or 1080p');
+          const videoPrompt = typeof prompt === 'string' && prompt.trim() ? prompt.trim() : 'The person is talking.';
+          predictionInput = {
+            image,
+            audio,
+            resolution,
+            video_prompt: videoPrompt,
+            seed: Number.isInteger(params?.seed) ? params.seed : undefined,
+            disable_safety_filter: false,
+          };
+        } else {
+          predictionInput = {
+            image,
+            audio,
+            prompt: model === 'bytedance/omni-human-1.5' ? prompt || undefined : undefined,
+            seed: Number.isInteger(params?.seed) ? params.seed : undefined,
+            fast_mode: model === 'bytedance/omni-human-1.5' ? params?.fast_mode === true : undefined,
+          };
+        }
       } else if (workflow === 'video-caption') {
         const video = await resolveOwnedStorageObject(user.id, req.body.video_storage_object_id, 'video/', 'Caption source video');
         if (!video) throw new Error('Captioning requires an owned video asset');

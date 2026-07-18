@@ -152,6 +152,7 @@ export default function StudioPage() {
   const isImageUpscale = workflow === 'image-upscale';
   const isVideoCaption = workflow === 'video-caption';
   const isSocialResize = workflow === 'social-resize';
+  const isPrunaAvatar = workflow === 'lip-sync' && model === 'prunaai/p-video-avatar';
   const isNanoBanana = activeModelDefinition?.family === 'nano-banana';
   const isRecraft = activeModelDefinition?.family === 'recraft';
   const isGrokImagineVideo = activeModelDefinition?.family === 'grok-video';
@@ -1422,10 +1423,10 @@ export default function StudioPage() {
             </div>
           )}
 
-          {(workflow === 'text-to-video' || workflow === 'text-to-image' || isSeedance || isKlingEdit || isGrokImagineVideo || (isVideoEnhance && model === 'xai/grok-imagine-video-extension')) && (
+          {(workflow === 'text-to-video' || workflow === 'text-to-image' || isSeedance || isKlingEdit || isGrokImagineVideo || isPrunaAvatar || (isVideoEnhance && model === 'xai/grok-imagine-video-extension')) && (
             <>
               <div className="prompt-heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 600 }}>{isSeedance || isGrokImagineVideo || isVideoEnhance ? '2.' : isKlingEdit ? '4.' : '1.'} Describe your creative vision</h3>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 600 }}>{isSeedance || isGrokImagineVideo || isVideoEnhance || isPrunaAvatar ? '2.' : isKlingEdit ? '4.' : '1.'} {isPrunaAvatar ? 'Optional avatar direction' : 'Describe your creative vision'}</h3>
                 <button
                   onClick={handleEnhancePrompt}
                   className="btn btn-secondary"
@@ -1438,7 +1439,7 @@ export default function StudioPage() {
               <textarea
                 className="form-textarea"
                 rows={5}
-                placeholder="A majestic golden dragon soaring over neon skyscrapers at sunset, reflection mapping on building glass..."
+                placeholder={isPrunaAvatar ? 'The person speaks naturally to camera with warm studio lighting, subtle head movement, and friendly expression.' : 'A majestic golden dragon soaring over neon skyscrapers at sunset, reflection mapping on building glass...'}
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
               />
@@ -1670,6 +1671,7 @@ export default function StudioPage() {
               }
               if (nextModel === 'google/nano-banana-pro') setImageResolution('2K');
               if (nextModel === 'google/nano-banana-2') setImageResolution('1K');
+              if (nextModel === 'prunaai/p-video-avatar') setResolution('720p');
               if (nextModel === 'bytedance/seedance-2.0-mini' && resolution === '1080p') {
                 setResolution('720p');
               }
@@ -1765,6 +1767,21 @@ export default function StudioPage() {
             </div>
             <p style={{ color: 'var(--foreground-muted)', fontSize: '0.75rem', margin: 0 }}>
               Grok generates synchronized audio automatically. Billing is 2 credits per output second.
+            </p>
+          </>
+        )}
+
+        {isPrunaAvatar && (
+          <>
+            <div>
+              <label className="form-label">Resolution</label>
+              <select className="form-select" value={resolution} onChange={(e) => setResolution(e.target.value)}>
+                <option value="720p">720p</option>
+                <option value="1080p">1080p</option>
+              </select>
+            </div>
+            <p style={{ color: 'var(--foreground-muted)', fontSize: '0.75rem', margin: 0 }}>
+              P-Video Avatar uses your portrait plus uploaded audio. The optional text prompt only guides the visual speaking style.
             </p>
           </>
         )}
