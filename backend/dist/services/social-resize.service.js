@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.assertSocialResizeFormat = assertSocialResizeFormat;
+exports.assertSocialResizeFormats = assertSocialResizeFormats;
 exports.assertSocialResizeMode = assertSocialResizeMode;
 exports.socialResizeLabel = socialResizeLabel;
 exports.renderSocialResize = renderSocialResize;
@@ -22,6 +23,16 @@ function assertSocialResizeFormat(value) {
     if (value === 'vertical' || value === 'square' || value === 'landscape')
         return value;
     throw new Error('Resize format must be vertical, square, or landscape');
+}
+function assertSocialResizeFormats(value) {
+    if (value === undefined || value === null || value === '')
+        return [assertSocialResizeFormat('vertical')];
+    if (!Array.isArray(value))
+        return [assertSocialResizeFormat(value)];
+    if (value.length === 0 || value.length > 3)
+        throw new Error('Resize batch accepts one to three formats');
+    const unique = Array.from(new Set(value.map((item) => assertSocialResizeFormat(item))));
+    return unique;
 }
 function assertSocialResizeMode(value) {
     if (value === undefined || value === null || value === '')

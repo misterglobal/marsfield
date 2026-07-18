@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { authenticate, mockApi } from './fixtures';
 
-test('resizes an owned video for social formats without credits', async ({ page }) => {
+test('batch resizes an owned video into all social formats without credits', async ({ page }) => {
   const video = {
     id: 'video-1',
     storageObjectId: 'storage-video-1',
@@ -28,7 +28,20 @@ test('resizes an owned video for social formats without credits', async ({ page 
     },
     'POST /api/v1/generate': async (route) => {
       submitted = route.request().postDataJSON();
-      await route.fulfill({ json: { id: 'resize-prediction', status: 'succeeded', output_url: 'https://example.com/square.mp4', credits_charged: 0 } });
+      await route.fulfill({
+        json: {
+          id: 'resize-vertical',
+          status: 'succeeded',
+          output_url: 'https://example.com/vertical.mp4',
+          credits_charged: 0,
+          variation_group_id: 'resize-group-1',
+          predictions: [
+            { id: 'resize-vertical', status: 'succeeded', output_url: 'https://example.com/vertical.mp4', variation_index: 0 },
+            { id: 'resize-square', status: 'succeeded', output_url: 'https://example.com/square.mp4', variation_index: 1 },
+            { id: 'resize-landscape', status: 'succeeded', output_url: 'https://example.com/landscape.mp4', variation_index: 2 },
+          ],
+        },
+      });
     },
   });
 
@@ -36,6 +49,7 @@ test('resizes an owned video for social formats without credits', async ({ page 
   await expect(page.getByRole('button', { name: /Social Resize/ })).toHaveClass(/btn-primary/);
   await page.getByLabel('Resize format').selectOption('square');
   await page.getByLabel('Resize mode').selectOption('fit');
+  await page.getByLabel('Export all social formats').check();
   await expect(page.getByText('Exact charge: 0 credits')).toBeVisible();
   await page.getByRole('button', { name: 'Generate Output' }).click();
 
@@ -44,6 +58,6 @@ test('resizes an owned video for social formats without credits', async ({ page 
     workflow: 'social-resize',
     model: 'local/ffmpeg-social-resize',
     video_storage_object_id: 'storage-video-1',
-    params: { format: 'square', mode: 'fit', variations: 1 },
+    params: { formats: ['vertical', 'square', 'landscape'], mode: 'fit', variations: 1 },
   });
 });

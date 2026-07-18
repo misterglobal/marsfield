@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { Prediction, PrismaClient } from '@prisma/client';
 import { authMiddleware, AuthenticatedRequest, requireScope } from '../middleware/auth.middleware';
 import { PredictionInput, ReplicateService } from '../services/replicate.service';
 import { queueService } from '../services/queue.service';
@@ -9,7 +9,7 @@ import { createAssetForPrediction, createAssetFromBufferForPrediction, createSup
 import { getRemoteImageMegapixels, getRemoteVideoDuration, getRemoteVideoMetadata } from '../services/media-probe.service';
 import { rateLimit } from '../middleware/rate-limit.middleware';
 import { getModelDefinition, modelIdsForFamily, modelSupportsWorkflow } from '../config/model-registry';
-import { assertSocialResizeFormat, assertSocialResizeMode, renderSocialResize, socialResizeLabel } from '../services/social-resize.service';
+import { assertSocialResizeFormat, assertSocialResizeFormats, assertSocialResizeMode, renderSocialResize, socialResizeLabel } from '../services/social-resize.service';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -146,7 +146,7 @@ router.post('/generate/quote', authMiddleware, requireScope('generation:write'),
       const duration = await getRemoteVideoDuration(video);
       if (duration > 180) throw new Error('Social resize clips are limited to 180 seconds');
       billingParams.duration = duration;
-      billingParams.format = assertSocialResizeFormat(params.format);
+      billingParams.formats = params.formats ? assertSocialResizeFormats(params.formats) : [assertSocialResizeFormat(params.format)];
       billingParams.mode = assertSocialResizeMode(params.mode);
     } else {
       throw new Error('Exact quotes are available for enhancement, caption, and social resize workflows');
@@ -465,17 +465,17 @@ router.post('/generate', authMiddleware, requireScope('generation:write'), rateL
         if (!video) throw new Error('Social resize requires an owned video asset');
         const sourceDuration = await getRemoteVideoDuration(video);
         if (sourceDuration > 180) throw new Error('Social resize clips are limited to 180 seconds');
-        const format = assertSocialResizeFormat(params?.format);
+        const formats = params?.formats ? assertSocialResizeFormats(params.formats) : [assertSocialResizeFormat(params?.format)];
         const mode = assertSocialResizeMode(params?.mode);
         billingParams.duration = sourceDuration;
-        billingParams.format = format;
+        billingParams.formats = formats;
         billingParams.mode = mode;
         billingParams.variations = 1;
         predictionInput = {
           source_video: video,
-          format,
+          formats,
           mode,
-          aspect_ratio: socialResizeLabel(format),
+          aspect_ratio: formats.map((format) => socialResizeLabel(format)).join(', '),
         };
       } else if (workflow === 'text-to-image') {
         if (!IMAGE_MODELS.has(model)) throw new Error('Unsupported image generation model');
@@ -626,69 +626,81 @@ router.post('/generate', authMiddleware, requireScope('generation:write'), rateL
 
     if (workflow === 'social-resize') {
       const sourceVideo = String(predictionInput.source_video || '');
-      const format = assertSocialResizeFormat(predictionInput.format);
+      const formats = assertSocialResizeFormats(predictionInput.formats);
       const mode = assertSocialResizeMode(predictionInput.mode);
-      const prediction = await prisma.prediction.create({
-        data: {
-          userId: user.id,
-          projectId,
-          storyboardSceneId,
-          workflow,
-          model,
-          prompt: `Resize video for ${socialResizeLabel(format)} (${mode})`,
-          inputParams: {
-            format,
-            mode,
-            aspect_ratio: socialResizeLabel(format),
-            source_video_storage_object_id: req.body.video_storage_object_id,
-          },
-          variationIndex: 0,
-          variationCount: 1,
-          creditCost: 0,
-          status: 'processing',
-        },
-      });
+      const resizeGroupId = formats.length > 1 ? randomUUID() : undefined;
+      const submittedPredictions: Prediction[] = [];
+      const createdPredictionIds: string[] = [];
 
       try {
-        const outputBuffer = await renderSocialResize({ sourceUrl: sourceVideo, format, mode });
-        const asset = await createAssetFromBufferForPrediction(prediction, outputBuffer, {
-          mimeType: 'video/mp4',
-          assetType: 'video',
-          originalName: `social-resize-${format}-${mode}.mp4`,
-          metadata: { workflow, format, mode },
-        });
-        const completedPrediction = await prisma.prediction.update({
-          where: { id: prediction.id },
-          data: { status: 'succeeded', outputUrl: asset.url, completedAt: new Date() },
-        });
+        for (let index = 0; index < formats.length; index++) {
+          const format = formats[index];
+          const prediction = await prisma.prediction.create({
+            data: {
+              userId: user.id,
+              projectId,
+              storyboardSceneId,
+              workflow,
+              model,
+              prompt: `Resize video for ${socialResizeLabel(format)} (${mode})`,
+              inputParams: {
+                format,
+                mode,
+                aspect_ratio: socialResizeLabel(format),
+                source_video_storage_object_id: req.body.video_storage_object_id,
+              },
+              variationGroupId: resizeGroupId,
+              variationIndex: index,
+              variationCount: formats.length,
+              creditCost: 0,
+              status: 'processing',
+            },
+          });
+          createdPredictionIds.push(prediction.id);
+          const outputBuffer = await renderSocialResize({ sourceUrl: sourceVideo, format, mode });
+          const asset = await createAssetFromBufferForPrediction(prediction, outputBuffer, {
+            mimeType: 'video/mp4',
+            assetType: 'video',
+            originalName: `social-resize-${format}-${mode}.mp4`,
+            metadata: { workflow, format, mode, batch: formats.length > 1 ? 'true' : 'false' },
+          });
+          const completedPrediction = await prisma.prediction.update({
+            where: { id: prediction.id },
+            data: { status: 'succeeded', outputUrl: asset.url, completedAt: new Date() },
+          });
+          submittedPredictions.push(completedPrediction);
+        }
         await prisma.usageEvent.create({
           data: {
             userId: user.id,
-            predictionId: prediction.id,
+            predictionId: submittedPredictions[0]?.id,
             eventType: 'generation',
             credits: 0,
-            metadata: { workflow, model, format, mode },
+            metadata: { workflow, model, formats, mode, variation_group_id: resizeGroupId },
           },
         });
+        const primaryPrediction = submittedPredictions[0];
         res.status(201).json({
-          id: completedPrediction.id,
-          status: completedPrediction.status,
-          output_url: completedPrediction.outputUrl,
-          created_at: completedPrediction.createdAt,
+          id: primaryPrediction.id,
+          status: primaryPrediction.status,
+          output_url: primaryPrediction.outputUrl,
+          created_at: primaryPrediction.createdAt,
           credits_charged: 0,
-          variation_group_id: null,
-          predictions: [{
-            id: completedPrediction.id,
-            status: completedPrediction.status,
-            output_url: completedPrediction.outputUrl,
-            variation_index: 0,
-          }],
+          variation_group_id: resizeGroupId,
+          predictions: submittedPredictions.map((prediction) => ({
+            id: prediction.id,
+            status: prediction.status,
+            output_url: prediction.outputUrl,
+            variation_index: prediction.variationIndex,
+          })),
         });
       } catch (error) {
-        await prisma.prediction.update({
-          where: { id: prediction.id },
-          data: { status: 'failed', errorMessage: error instanceof Error ? error.message : 'Social resize failed', completedAt: new Date() },
-        });
+        await Promise.all(createdPredictionIds
+          .filter((id) => !submittedPredictions.some((prediction) => prediction.id === id && prediction.status === 'succeeded'))
+          .map((id) => prisma.prediction.update({
+            where: { id },
+            data: { status: 'failed', errorMessage: error instanceof Error ? error.message : 'Social resize failed', completedAt: new Date() },
+          })));
         throw error;
       }
       return;

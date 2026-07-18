@@ -735,6 +735,15 @@ body::after {
     flex-wrap: wrap;
   }
 
+  .timeline-clip-row {
+    grid-template-columns: 32px minmax(0, 1fr) !important;
+  }
+
+  .timeline-clip-row input,
+  .timeline-clip-row > div:last-child {
+    grid-column: 1 / -1;
+  }
+
   .usage-row > div:last-child {
     text-align: left !important;
   }

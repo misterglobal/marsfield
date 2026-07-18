@@ -111,6 +111,10 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(payload),
   }),
+  exportTimeline: (projectId: string, payload: any) => request(`/projects/${projectId}/timeline-export`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
 
   // Reusable character and brand kits
   getKits: () => request('/kits'),

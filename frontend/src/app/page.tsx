@@ -91,6 +91,7 @@ export default function StudioPage() {
   const [captionTranslate, setCaptionTranslate] = useState(false);
   const [resizeFormat, setResizeFormat] = useState<'vertical' | 'square' | 'landscape'>('vertical');
   const [resizeMode, setResizeMode] = useState<'crop' | 'fit'>('crop');
+  const [resizeBatchAll, setResizeBatchAll] = useState(false);
   const [enhanceRealism, setEnhanceRealism] = useState(false);
   const [enhanceTargetResolution, setEnhanceTargetResolution] = useState('1080p');
   const [enhanceTargetFps, setEnhanceTargetFps] = useState(30);
@@ -244,6 +245,7 @@ export default function StudioPage() {
         upscale_factor: model === 'google/upscaler' ? `x${upscaleFactor}` : undefined,
         scale_factor: Number(upscaleFactor),
         format: resizeFormat,
+        formats: resizeBatchAll ? ['vertical', 'square', 'landscape'] : undefined,
         mode: resizeMode,
       };
       void api.quoteGeneration({
@@ -256,7 +258,7 @@ export default function StudioPage() {
         .catch((error) => setEnhancementQuoteError(error.message || 'Could not calculate exact credit quote'));
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [token, workflow, model, isVideoEnhance, isImageUpscale, isVideoCaption, isSocialResize, referenceVideos, imageStorageObjectId, extensionDuration, enhanceTargetResolution, enhanceTargetFps, upscaleTargetMp, upscaleFactor, resizeFormat, resizeMode]);
+  }, [token, workflow, model, isVideoEnhance, isImageUpscale, isVideoCaption, isSocialResize, referenceVideos, imageStorageObjectId, extensionDuration, enhanceTargetResolution, enhanceTargetFps, upscaleTargetMp, upscaleFactor, resizeFormat, resizeMode, resizeBatchAll]);
 
   const getBaseCredits = () => {
     if (isSocialResize) return 0;
@@ -901,7 +903,8 @@ export default function StudioPage() {
       } else if (isSocialResize && referenceVideos[0]) {
         generatePayload.video_storage_object_id = referenceVideos[0].id;
         generatePayload.params = {
-          format: resizeFormat,
+          format: resizeBatchAll ? undefined : resizeFormat,
+          formats: resizeBatchAll ? ['vertical', 'square', 'landscape'] : undefined,
           mode: resizeMode,
           variations: 1,
         };
@@ -1020,6 +1023,7 @@ export default function StudioPage() {
                     setReferenceVideoDuration(null);
                     setResizeFormat('vertical');
                     setResizeMode('crop');
+                    setResizeBatchAll(false);
                   }
                 }}
                 className={`btn ${isActive ? 'btn-primary' : 'btn-secondary'}`}
@@ -1327,7 +1331,7 @@ export default function StudioPage() {
                 <div className="caption-control-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.85rem' }}>
                   <div>
                     <label className="form-label">Target format</label>
-                    <select aria-label="Resize format" className="form-select" value={resizeFormat} onChange={(event) => setResizeFormat(event.target.value as 'vertical' | 'square' | 'landscape')}>
+                    <select aria-label="Resize format" className="form-select" value={resizeFormat} onChange={(event) => setResizeFormat(event.target.value as 'vertical' | 'square' | 'landscape')} disabled={resizeBatchAll}>
                       <option value="vertical">9:16 Reels / Shorts</option>
                       <option value="square">1:1 Feed Square</option>
                       <option value="landscape">16:9 YouTube / Web</option>
@@ -1341,8 +1345,15 @@ export default function StudioPage() {
                     </select>
                   </div>
                 </div>
+                <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginTop: '0.85rem', padding: '0.85rem', border: '1px solid var(--panel-border)', borderRadius: '10px' }}>
+                  <span>
+                    <strong style={{ display: 'block', fontSize: '0.9rem' }}>Export all social formats</strong>
+                    <small style={{ color: 'var(--foreground-muted)' }}>Creates 9:16, 1:1, and 16:9 outputs together and groups them in results.</small>
+                  </span>
+                  <input aria-label="Export all social formats" type="checkbox" checked={resizeBatchAll} onChange={(event) => setResizeBatchAll(event.target.checked)} />
+                </label>
                 <p style={{ color: 'var(--foreground-muted)', fontSize: '0.75rem', margin: '0.65rem 0 0' }}>
-                  Crop is best for punchy social clips. Fit preserves the full frame with padding when you do not want to lose edges.
+                  Crop is best for punchy social clips. Fit preserves the full frame with padding when you do not want to lose edges. Batch exports are still free; storage usage applies to each saved output.
                 </p>
               </div>
             </div>

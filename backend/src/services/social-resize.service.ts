@@ -20,6 +20,14 @@ export function assertSocialResizeFormat(value: unknown): SocialResizeFormat {
   throw new Error('Resize format must be vertical, square, or landscape');
 }
 
+export function assertSocialResizeFormats(value: unknown): SocialResizeFormat[] {
+  if (value === undefined || value === null || value === '') return [assertSocialResizeFormat('vertical')];
+  if (!Array.isArray(value)) return [assertSocialResizeFormat(value)];
+  if (value.length === 0 || value.length > 3) throw new Error('Resize batch accepts one to three formats');
+  const unique = Array.from(new Set(value.map((item) => assertSocialResizeFormat(item))));
+  return unique;
+}
+
 export function assertSocialResizeMode(value: unknown): SocialResizeMode {
   if (value === undefined || value === null || value === '') return 'crop';
   if (value === 'crop' || value === 'fit') return value;
