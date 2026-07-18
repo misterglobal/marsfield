@@ -1,5 +1,5 @@
-export type BackendWorkflow = 'text-to-video' | 'image-to-video' | 'lip-sync' | 'text-to-image' | 'multimodal-video' | 'video-edit' | 'video-enhance' | 'image-upscale';
-export type BackendModelFamily = 'general' | 'seedance' | 'nano-banana' | 'recraft' | 'grok-video' | 'kling-edit' | 'video-enhance' | 'image-upscale';
+export type BackendWorkflow = 'text-to-video' | 'image-to-video' | 'lip-sync' | 'text-to-image' | 'multimodal-video' | 'video-edit' | 'video-enhance' | 'image-upscale' | 'video-caption' | 'social-resize';
+export type BackendModelFamily = 'general' | 'seedance' | 'nano-banana' | 'recraft' | 'grok-video' | 'kling-edit' | 'video-enhance' | 'image-upscale' | 'caption' | 'local-processing';
 
 export interface BackendModelDefinition {
   id: string;
@@ -17,6 +17,7 @@ export const MODEL_REGISTRY: readonly BackendModelDefinition[] = [
   { id: 'minimax/hailuo-live', workflow: 'image-to-video', family: 'general', output: 'video' },
   { id: 'bytedance/omni-human', workflow: 'lip-sync', family: 'general', output: 'video' },
   { id: 'bytedance/omni-human-1.5', workflow: 'lip-sync', family: 'general', output: 'video' },
+  { id: 'prunaai/p-video-avatar', workflow: 'lip-sync', family: 'general', output: 'video' },
   { id: 'black-forest-labs/flux-schnell', workflow: 'text-to-image', family: 'general', output: 'image' },
   { id: 'stability-ai/stable-diffusion-3', workflow: 'text-to-image', family: 'general', output: 'image' },
   { id: 'google/nano-banana-2', workflow: 'text-to-image', family: 'nano-banana', output: 'image' },
@@ -32,6 +33,8 @@ export const MODEL_REGISTRY: readonly BackendModelDefinition[] = [
   { id: 'prunaai/p-image-upscale', workflow: 'image-upscale', family: 'image-upscale', output: 'image' },
   { id: 'google/upscaler', workflow: 'image-upscale', family: 'image-upscale', output: 'image' },
   { id: 'philz1337x/clarity-pro-upscaler', workflow: 'image-upscale', family: 'image-upscale', output: 'image' },
+  { id: 'fictions-ai/autocaption:18a45ff0d95feb4449d192bbdc06b4a6df168fa33def76dfc51b78ae224b599b', workflow: 'video-caption', family: 'caption', output: 'video' },
+  { id: 'local/ffmpeg-social-resize', workflow: 'social-resize', family: 'local-processing', output: 'video' },
 ] as const;
 
 export const getModelDefinition = (id: string) => MODEL_REGISTRY.find((model) => model.id === id);

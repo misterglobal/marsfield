@@ -91,6 +91,18 @@ export const api = {
   toggleFavorite: (id: string) => request(`/assets/${id}/favorite`, {
     method: 'POST',
   }),
+  getVideoPackagingIdeas: (id: string, payload: any = {}) => request(`/assets/${id}/packaging/ideas`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  createVideoThumbnailStills: (id: string, payload: any = {}) => request(`/assets/${id}/packaging/thumbnails`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  createTitleOverlay: (id: string, payload: any) => request(`/assets/${id}/packaging/title-overlay`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
   quoteGeneration: (payload: any) => request('/generate/quote', {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -108,6 +120,10 @@ export const api = {
     body: JSON.stringify(payload),
   }),
   createStoryboardPlan: (projectId: string, payload: any) => request(`/projects/${projectId}/storyboard-plan`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  exportTimeline: (projectId: string, payload: any) => request(`/projects/${projectId}/timeline-export`, {
     method: 'POST',
     body: JSON.stringify(payload),
   }),

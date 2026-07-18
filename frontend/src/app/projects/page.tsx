@@ -29,10 +29,38 @@ interface ProjectDetail extends ProjectSummary {
       status: string;
       outputUrl: string | null;
       model: string;
+      workflow?: string | null;
+      prompt?: string | null;
       createdAt: string;
+      assets?: Array<{
+        id: string;
+        url: string;
+        type: string;
+        thumbnailUrl: string | null;
+        storageObjectId: string | null;
+      }>;
     }>;
   }>;
 }
+
+interface TimelineAsset {
+  id: string;
+  url: string;
+  type: string;
+  thumbnailUrl: string | null;
+  storageObjectId: string | null;
+  prediction?: { prompt?: string | null; workflow?: string | null; model?: string | null } | null;
+}
+
+interface TimelineClip {
+  assetId: string;
+  label: string;
+  startSeconds: number;
+  endSeconds: string;
+}
+
+type StoryboardScene = ProjectDetail['scenes'][number];
+type StoryboardPrediction = StoryboardScene['predictions'][number];
 
 export default function ProjectsPage() {
   const { token } = useAuth();
@@ -49,6 +77,11 @@ export default function ProjectsPage() {
   const [visualStyle, setVisualStyle] = useState('cinematic realism');
   const [aspectRatio, setAspectRatio] = useState('16:9');
   const [continuity, setContinuity] = useState('');
+  const [timelineAssets, setTimelineAssets] = useState<TimelineAsset[]>([]);
+  const [timelineClips, setTimelineClips] = useState<TimelineClip[]>([]);
+  const [timelineTitle, setTimelineTitle] = useState('Final timeline export');
+  const [timelineExporting, setTimelineExporting] = useState(false);
+  const [timelineResultUrl, setTimelineResultUrl] = useState('');
   const [planning, setPlanning] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -95,6 +128,103 @@ export default function ProjectsPage() {
       setSelectedProject(await api.getProject(projectId));
     } catch (err: any) {
       setError(err.message || 'Failed to load project');
+    }
+  };
+
+  const loadTimelineAssets = useCallback(async (projectId: string) => {
+    try {
+      const assets = await api.getAssets(projectId);
+      setTimelineAssets(assets.filter((asset: TimelineAsset) => asset.type === 'video' && asset.storageObjectId));
+    } catch (err: any) {
+      setError(err.message || 'Failed to load project video assets');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!token || !selectedProject) {
+      setTimelineAssets([]);
+      setTimelineClips([]);
+      return;
+    }
+    void loadTimelineAssets(selectedProject.id);
+    setTimelineClips([]);
+    setTimelineResultUrl('');
+  }, [token, selectedProject?.id, loadTimelineAssets]);
+
+  const addTimelineClip = (asset: TimelineAsset) => {
+    setTimelineClips((current) => [...current, {
+      assetId: asset.id,
+      label: asset.prediction?.prompt?.slice(0, 36) || `Clip ${current.length + 1}`,
+      startSeconds: 0,
+      endSeconds: '',
+    }]);
+  };
+
+  const scenePredictionToTimelineClip = (scene: StoryboardScene, prediction: StoryboardPrediction): TimelineClip | null => {
+    const videoAsset = prediction.assets?.find((asset) => asset.type === 'video' && asset.storageObjectId);
+    if (!videoAsset) return null;
+
+    return {
+      assetId: videoAsset.id,
+      label: `${scene.title || `Scene ${scene.index + 1}`} result`,
+      startSeconds: 0,
+      endSeconds: '',
+    };
+  };
+
+  const storyboardReadyClips = selectedProject?.scenes
+    .slice()
+    .sort((a, b) => a.index - b.index)
+    .map((scene) => {
+      const readyPrediction = scene.predictions.find((prediction) => prediction.status === 'succeeded' && scenePredictionToTimelineClip(scene, prediction));
+      return readyPrediction ? scenePredictionToTimelineClip(scene, readyPrediction) : null;
+    })
+    .filter((clip): clip is TimelineClip => Boolean(clip)) ?? [];
+
+  const addStoryboardResultsToTimeline = () => {
+    if (!selectedProject || storyboardReadyClips.length === 0) return;
+    setTimelineTitle(`${selectedProject.name} final cut`);
+    setTimelineClips(storyboardReadyClips);
+    setTimelineResultUrl('');
+  };
+
+  const moveTimelineClip = (index: number, direction: -1 | 1) => {
+    setTimelineClips((current) => {
+      const nextIndex = index + direction;
+      if (nextIndex < 0 || nextIndex >= current.length) return current;
+      const next = [...current];
+      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+      return next;
+    });
+  };
+
+  const updateTimelineClip = (index: number, patch: Partial<TimelineClip>) => {
+    setTimelineClips((current) => current.map((clip, clipIndex) => clipIndex === index ? { ...clip, ...patch } : clip));
+  };
+
+  const exportTimeline = async () => {
+    if (!selectedProject || timelineClips.length === 0) return;
+    setTimelineExporting(true);
+    setTimelineResultUrl('');
+    setError('');
+    try {
+      const payload = {
+        title: timelineTitle,
+        clips: timelineClips.map((clip) => ({
+          asset_id: clip.assetId,
+          start_seconds: Number(clip.startSeconds || 0),
+          end_seconds: clip.endSeconds === '' ? undefined : Number(clip.endSeconds),
+        })),
+      };
+      const result = await api.exportTimeline(selectedProject.id, payload);
+      setTimelineResultUrl(result.output_url);
+      setSelectedProject(await api.getProject(selectedProject.id));
+      await loadTimelineAssets(selectedProject.id);
+      await loadProjects();
+    } catch (err: any) {
+      setError(err.message || 'Failed exporting timeline');
+    } finally {
+      setTimelineExporting(false);
     }
   };
 
@@ -214,6 +344,78 @@ export default function ProjectsPage() {
               </div>
             </div>
 
+            <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1rem' }}>Timeline editor v1</h3>
+                <p style={{ margin: '0.35rem 0 0', color: 'var(--foreground-muted)', fontSize: '0.82rem' }}>
+                  Add project video assets, reorder them, trim start/end, and export a final silent 1080p MP4. Audio tools come next.
+                </p>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 180px 220px', gap: '0.75rem' }}>
+                <input className="form-input" aria-label="Timeline title" value={timelineTitle} onChange={(event) => setTimelineTitle(event.target.value)} placeholder="Timeline export title" />
+                <button className="btn btn-secondary" type="button" onClick={() => selectedProject && void loadTimelineAssets(selectedProject.id)}>
+                  Refresh assets
+                </button>
+                <button className="btn btn-secondary" type="button" onClick={addStoryboardResultsToTimeline} disabled={storyboardReadyClips.length === 0}>
+                  Add storyboard results
+                </button>
+              </div>
+              {storyboardReadyClips.length > 0 && (
+                <p style={{ margin: '-0.45rem 0 0', color: 'var(--foreground-muted)', fontSize: '0.8rem' }}>
+                  {storyboardReadyClips.length} generated scene result{storyboardReadyClips.length === 1 ? '' : 's'} can be assembled in storyboard order.
+                </p>
+              )}
+
+              {timelineAssets.length > 0 ? (
+                <div style={{ display: 'flex', gap: '0.6rem', overflowX: 'auto', paddingBottom: '0.25rem' }}>
+                  {timelineAssets.slice(0, 16).map((asset) => (
+                    <button key={asset.id} type="button" className="btn btn-secondary" onClick={() => addTimelineClip(asset)} style={{ minWidth: 150, padding: '0.7rem', textAlign: 'left' }}>
+                      <span style={{ display: 'block', fontWeight: 700 }}>Add clip</span>
+                      <small style={{ color: 'var(--foreground-muted)' }}>{asset.prediction?.prompt?.slice(0, 34) || asset.id.slice(0, 8)}</small>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ margin: 0, color: 'var(--foreground-muted)', fontSize: '0.82rem' }}>
+                  No project video assets yet. Generate storyboard scenes in Studio, then refresh assets here.
+                </p>
+              )}
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                {timelineClips.map((clip, index) => (
+                  <div key={`${clip.assetId}-${index}`} className="timeline-clip-row" style={{ display: 'grid', gridTemplateColumns: '44px 1fr 110px 110px 170px', gap: '0.65rem', alignItems: 'center', padding: '0.75rem', border: '1px solid var(--panel-border)', borderRadius: '12px' }}>
+                    <strong>{index + 1}</strong>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{clip.label}</span>
+                    <input className="form-input" aria-label={`Clip ${index + 1} start`} type="number" min={0} step={0.1} value={clip.startSeconds} onChange={(event) => updateTimelineClip(index, { startSeconds: Number(event.target.value) })} />
+                    <input className="form-input" aria-label={`Clip ${index + 1} end`} type="number" min={0} step={0.1} placeholder="End" value={clip.endSeconds} onChange={(event) => updateTimelineClip(index, { endSeconds: event.target.value })} />
+                    <div style={{ display: 'flex', gap: '0.35rem', justifyContent: 'flex-end' }}>
+                      <button className="btn btn-secondary" type="button" onClick={() => moveTimelineClip(index, -1)} disabled={index === 0} style={{ padding: '0.45rem 0.6rem' }}>Up</button>
+                      <button className="btn btn-secondary" type="button" onClick={() => moveTimelineClip(index, 1)} disabled={index === timelineClips.length - 1} style={{ padding: '0.45rem 0.6rem' }}>Down</button>
+                      <button className="btn btn-secondary" type="button" onClick={() => setTimelineClips((current) => current.filter((_, clipIndex) => clipIndex !== index))} style={{ padding: '0.45rem 0.6rem' }}>Remove</button>
+                    </div>
+                  </div>
+                ))}
+                {timelineClips.length === 0 && (
+                  <div style={{ border: '1px dashed var(--panel-border)', borderRadius: '12px', padding: '1rem', color: 'var(--foreground-muted)', fontSize: '0.85rem' }}>
+                    Add clips above to build a timeline.
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ color: 'var(--foreground-muted)', fontSize: '0.8rem' }}>{timelineClips.length} clip{timelineClips.length === 1 ? '' : 's'} · 0 credits</span>
+                <button className="btn btn-primary" type="button" onClick={() => void exportTimeline()} disabled={timelineExporting || timelineClips.length === 0}>
+                  {timelineExporting ? 'Exporting timeline...' : 'Export final video'}
+                </button>
+              </div>
+              {timelineResultUrl && (
+                <a href={timelineResultUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)', fontSize: '0.85rem' }}>
+                  Timeline export ready — open video
+                </a>
+              )}
+            </div>
+
             <form className="glass-card" onSubmit={createPlan} style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: '1rem' }}>Script-to-film planner</h3>
@@ -294,15 +496,25 @@ export default function ProjectsPage() {
                       <button className="btn btn-secondary" type="button" onClick={() => editScene(scene)} style={{ padding: '0.55rem 0.9rem', fontSize: '0.8rem' }}>
                         Edit scene
                       </button>
-                      {scene.predictions?.slice(0, 3).map((prediction) => (
-                        prediction.outputUrl ? (
-                          <a key={prediction.id} href={prediction.outputUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)', fontSize: '0.8rem' }}>
-                            Result {prediction.status === 'succeeded' ? 'ready' : prediction.status}
-                          </a>
-                        ) : (
-                          <span key={prediction.id} className="badge badge-purple">{prediction.status}</span>
-                        )
-                      ))}
+                      {scene.predictions?.slice(0, 3).map((prediction) => {
+                        const clip = scenePredictionToTimelineClip(scene, prediction);
+                        return (
+                          <div key={prediction.id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                            {prediction.outputUrl ? (
+                              <a href={prediction.outputUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)', fontSize: '0.8rem' }}>
+                                Result {prediction.status === 'succeeded' ? 'ready' : prediction.status}
+                              </a>
+                            ) : (
+                              <span className="badge badge-purple">{prediction.status}</span>
+                            )}
+                            {clip && (
+                              <button className="btn btn-secondary" type="button" onClick={() => setTimelineClips((current) => [...current, clip])} style={{ padding: '0.45rem 0.7rem', fontSize: '0.78rem' }}>
+                                Add to timeline
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 </article>

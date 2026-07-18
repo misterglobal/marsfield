@@ -13,6 +13,10 @@ function parseVariationCount(params) {
     return requested;
 }
 function getBaseCredits(input) {
+    if (input.workflow === 'social-resize')
+        return 0;
+    if (input.workflow === 'video-caption')
+        return 4;
     if (input.workflow === 'image-upscale') {
         if (input.model === 'google/upscaler')
             return 1;
@@ -89,6 +93,14 @@ function getBaseCredits(input) {
 function quoteGeneration(input) {
     const baseCredits = getBaseCredits(input);
     const variationCount = parseVariationCount(input.params);
+    if (baseCredits === 0) {
+        return {
+            baseCredits,
+            variationCount: 1,
+            variationCredits: 0,
+            totalCredits: 0,
+        };
+    }
     const additionalOutputCredits = input.model === 'google/nano-banana-pro'
         ? baseCredits
         : Math.ceil(baseCredits * 0.75);

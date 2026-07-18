@@ -38,14 +38,11 @@ export class ReplicateService {
     model: string,
     input: PredictionInput,
     webhookUrl?: string
-  ): Promise<{ id: string; status: string; outputUrl?: string }> {
+  ): Promise<{ id: string; status: string; outputUrl?: string; outputUrls?: string[] }> {
     // If Replicate token exists, use real API
     if (this.replicate) {
       try {
-        const payload: any = {
-          model,
-          input,
-        };
+        const payload: any = model.includes(':') ? { version: model.split(':', 2)[1], input } : { model, input };
 
         if (webhookUrl) {
           payload.webhook = webhookUrl;
@@ -57,6 +54,7 @@ export class ReplicateService {
           id: prediction.id,
           status: prediction.status,
           outputUrl: this.getOutputUrl(prediction.output),
+          outputUrls: this.getOutputUrls(prediction.output),
         };
       } catch (error) {
         console.error("Replicate API Error:", this.formatReplicateError(error));
@@ -75,7 +73,7 @@ export class ReplicateService {
     };
   }
 
-  public async getPrediction(id: string): Promise<{ id: string; status: string; outputUrl?: string; error?: string }> {
+  public async getPrediction(id: string): Promise<{ id: string; status: string; outputUrl?: string; outputUrls?: string[]; error?: string }> {
     if (this.replicate && !id.startsWith('mock_')) {
       try {
         const prediction = await this.replicate.predictions.get(id);
@@ -83,6 +81,7 @@ export class ReplicateService {
           id: prediction.id,
           status: prediction.status,
           outputUrl: this.getOutputUrl(prediction.output),
+          outputUrls: this.getOutputUrls(prediction.output),
           error: prediction.error,
         };
       } catch (error) {
@@ -108,6 +107,18 @@ export class ReplicateService {
       return candidate.url || candidate.uri;
     }
     return undefined;
+  }
+
+  private getOutputUrls(output: unknown): string[] {
+    const values = Array.isArray(output) ? output : [output];
+    return values.map((value) => {
+      if (typeof value === 'string') return value;
+      if (value && typeof value === 'object') {
+        const candidate = value as { url?: string; uri?: string };
+        return candidate.url || candidate.uri || '';
+      }
+      return '';
+    }).filter(Boolean);
   }
 
   private formatReplicateError(error: unknown): Record<string, unknown> {

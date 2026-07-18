@@ -19,6 +19,21 @@ interface AssetData {
   } | null;
 }
 
+interface PackagingIdeas {
+  hooks: string[];
+  titleOverlays: string[];
+  thumbnailPrompts: string[];
+}
+
+interface PackagingState {
+  ideas?: PackagingIdeas;
+  title: string;
+  subtitle: string;
+  loading?: string;
+  message?: string;
+  error?: string;
+}
+
 function actionHref(assetId: string, workflow: string, model?: string): string {
   const query = new URLSearchParams({ workflow, asset_id: assetId });
   if (model) query.set('model', model);
@@ -36,6 +51,8 @@ function assetActions(asset: AssetData) {
   ];
   if (asset.type === 'video') return [
     { label: 'Save to kit', href: `/kits?asset_id=${encodeURIComponent(asset.id)}` },
+    { label: 'Resize for social', href: actionHref(asset.id, 'social-resize') },
+    { label: 'Add captions', href: actionHref(asset.id, 'video-caption') },
     { label: 'Kling edit', href: actionHref(asset.id, 'video-edit') },
     { label: 'Enhance', href: actionHref(asset.id, 'video-enhance') },
     { label: 'Extend', href: actionHref(asset.id, 'video-enhance', 'xai/grok-imagine-video-extension') },
@@ -54,6 +71,7 @@ export default function LibraryPage() {
   const [assets, setAssets] = useState<AssetData[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [packaging, setPackaging] = useState<Record<string, PackagingState>>({});
 
   const fetchAssets = useCallback(async () => {
     if (!token) return;
@@ -83,6 +101,67 @@ export default function LibraryPage() {
       );
     } catch (err: any) {
       console.error('Failed to toggle favorite:', err);
+    }
+  };
+
+  const updatePackaging = (assetId: string, patch: Partial<PackagingState>) => {
+    const defaults: PackagingState = { title: '', subtitle: '' };
+    setPackaging((current) => ({
+      ...current,
+      [assetId]: {
+        ...defaults,
+        ...(current[assetId] || {}),
+        ...patch,
+      },
+    }));
+  };
+
+  const generatePackagingIdeas = async (asset: AssetData) => {
+    updatePackaging(asset.id, { loading: 'ideas', error: '', message: '' });
+    try {
+      const ideas = await api.getVideoPackagingIdeas(asset.id, { context: asset.prediction?.prompt || '' });
+      updatePackaging(asset.id, {
+        ideas,
+        title: ideas.titleOverlays?.[0] || '',
+        subtitle: ideas.hooks?.[0] || '',
+        loading: '',
+        message: 'Hook and overlay ideas ready.',
+      });
+    } catch (err: any) {
+      updatePackaging(asset.id, { loading: '', error: err.message || 'Failed generating ideas' });
+    }
+  };
+
+  const saveThumbnailStills = async (asset: AssetData) => {
+    updatePackaging(asset.id, { loading: 'thumbnails', error: '', message: '' });
+    try {
+      const result = await api.createVideoThumbnailStills(asset.id);
+      updatePackaging(asset.id, {
+        loading: '',
+        message: `Saved ${result.assets?.length || 0} thumbnail stills to your library.`,
+      });
+      await fetchAssets();
+    } catch (err: any) {
+      updatePackaging(asset.id, { loading: '', error: err.message || 'Failed saving thumbnail stills' });
+    }
+  };
+
+  const createTitleOverlay = async (asset: AssetData) => {
+    const current = packaging[asset.id];
+    if (!current?.title.trim()) {
+      updatePackaging(asset.id, { error: 'Choose or enter a title first.' });
+      return;
+    }
+    updatePackaging(asset.id, { loading: 'overlay', error: '', message: '' });
+    try {
+      await api.createTitleOverlay(asset.id, {
+        title: current.title,
+        subtitle: current.subtitle,
+      });
+      updatePackaging(asset.id, { loading: '', message: 'Title-overlay video saved to your library.' });
+      await fetchAssets();
+    } catch (err: any) {
+      updatePackaging(asset.id, { loading: '', error: err.message || 'Failed creating title overlay' });
     }
   };
 
@@ -193,8 +272,9 @@ export default function LibraryPage() {
                 )}
                 {!asset.thumbnailUrl && asset.type === 'audio' && <span style={{ fontSize: '3rem' }}>🎵</span>}
                 {!asset.thumbnailUrl && asset.type === 'video' && <span style={{ fontSize: '3rem' }}>🎬</span>}
+                {!asset.thumbnailUrl && asset.type === 'document' && <span style={{ fontSize: '3rem' }}>📄</span>}
                 <span className="asset-tag" style={{ textTransform: 'capitalize' }}>
-                  {asset.type === 'video' ? '🎬 Video' : asset.type === 'audio' ? '🎵 Audio' : '🖼️ Image'}
+                  {asset.type === 'video' ? '🎬 Video' : asset.type === 'audio' ? '🎵 Audio' : asset.type === 'document' ? '📄 Transcript' : '🖼️ Image'}
                 </span>
                 <button
                   onClick={() => toggleFavorite(asset.id)}
@@ -232,6 +312,58 @@ export default function LibraryPage() {
                         {action.label}
                       </a>
                     ))}
+                  </div>
+                )}
+                {asset.type === 'video' && asset.storageObjectId && (
+                  <div style={{ marginTop: '0.75rem', borderTop: '1px solid var(--panel-border)', paddingTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <strong style={{ fontSize: '0.78rem' }}>Hooks, titles, thumbnails</strong>
+                      <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                        <button type="button" className="btn btn-secondary" onClick={() => void generatePackagingIdeas(asset)} disabled={packaging[asset.id]?.loading === 'ideas'} style={{ padding: '0.35rem 0.55rem', fontSize: '0.7rem' }}>
+                          {packaging[asset.id]?.loading === 'ideas' ? 'Thinking…' : 'Ideas'}
+                        </button>
+                        <button type="button" className="btn btn-secondary" onClick={() => void saveThumbnailStills(asset)} disabled={packaging[asset.id]?.loading === 'thumbnails'} style={{ padding: '0.35rem 0.55rem', fontSize: '0.7rem' }}>
+                          {packaging[asset.id]?.loading === 'thumbnails' ? 'Saving…' : 'Save stills'}
+                        </button>
+                      </div>
+                    </div>
+                    {packaging[asset.id]?.ideas && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                          {packaging[asset.id].ideas?.titleOverlays.slice(0, 3).map((title) => (
+                            <button key={title} type="button" className="btn btn-secondary" onClick={() => updatePackaging(asset.id, { title })} style={{ padding: '0.3rem 0.5rem', fontSize: '0.68rem' }}>
+                              {title}
+                            </button>
+                          ))}
+                        </div>
+                        <ul style={{ margin: 0, paddingLeft: '1rem', color: 'var(--foreground-muted)', fontSize: '0.72rem' }}>
+                          {packaging[asset.id].ideas?.hooks.slice(0, 2).map((hook) => <li key={hook}>{hook}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                    <input
+                      className="form-input"
+                      aria-label={`Title overlay for ${asset.id}`}
+                      placeholder="Title overlay"
+                      maxLength={80}
+                      value={packaging[asset.id]?.title || ''}
+                      onChange={(event) => updatePackaging(asset.id, { title: event.target.value })}
+                      style={{ fontSize: '0.75rem', padding: '0.5rem 0.65rem' }}
+                    />
+                    <input
+                      className="form-input"
+                      aria-label={`Subtitle overlay for ${asset.id}`}
+                      placeholder="Optional subtitle / hook"
+                      maxLength={100}
+                      value={packaging[asset.id]?.subtitle || ''}
+                      onChange={(event) => updatePackaging(asset.id, { subtitle: event.target.value })}
+                      style={{ fontSize: '0.75rem', padding: '0.5rem 0.65rem' }}
+                    />
+                    <button type="button" className="btn btn-primary" onClick={() => void createTitleOverlay(asset)} disabled={packaging[asset.id]?.loading === 'overlay'} style={{ padding: '0.45rem 0.65rem', fontSize: '0.75rem' }}>
+                      {packaging[asset.id]?.loading === 'overlay' ? 'Rendering overlay…' : 'Render title overlay'}
+                    </button>
+                    {packaging[asset.id]?.message && <small style={{ color: 'var(--primary)' }}>{packaging[asset.id]?.message}</small>}
+                    {packaging[asset.id]?.error && <small style={{ color: '#ef4444' }}>{packaging[asset.id]?.error}</small>}
                   </div>
                 )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem', borderTop: '1px solid var(--panel-border)', paddingTop: '0.75rem' }}>

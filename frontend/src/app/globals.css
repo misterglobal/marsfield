@@ -703,6 +703,10 @@ body::after {
     grid-template-columns: minmax(0, 1fr) !important;
   }
 
+  .caption-control-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
   .plan-grid {
     grid-template-columns: minmax(0, 1fr) !important;
   }
@@ -729,6 +733,15 @@ body::after {
   .api-key-row > div:last-child {
     justify-content: space-between;
     flex-wrap: wrap;
+  }
+
+  .timeline-clip-row {
+    grid-template-columns: 32px minmax(0, 1fr) !important;
+  }
+
+  .timeline-clip-row input,
+  .timeline-clip-row > div:last-child {
+    grid-column: 1 / -1;
   }
 
   .usage-row > div:last-child {

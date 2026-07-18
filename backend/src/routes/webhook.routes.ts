@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { createAssetForPrediction } from '../services/asset.service';
+import { createAssetForPrediction, createSupplementaryAssetForPrediction } from '../services/asset.service';
 import { getPlan, getPlanByFreemiusPlanId, parseFreemiusDate, verifyFreemiusSignature } from '../services/freemius.service';
 
 const router = Router();
@@ -9,6 +9,15 @@ const prisma = new PrismaClient();
 function getString(value: unknown): string | undefined {
   if (value === undefined || value === null || value === '') return undefined;
   return String(value);
+}
+
+function getOutputUrl(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return getOutputUrl(record.url || record.href);
+  }
+  return undefined;
 }
 
 function isCancellationEvent(type: string): boolean {
@@ -38,7 +47,7 @@ router.post('/replicate', async (req, res) => {
     }
 
     const finalStatus = status === 'succeeded' ? 'succeeded' : status === 'failed' ? 'failed' : 'processing';
-    const outputUrl = Array.isArray(output) ? output[0] : output;
+    const outputUrl = getOutputUrl(Array.isArray(output) ? output[0] : output);
 
     const updatedPrediction = await prisma.prediction.update({
         where: { id: prediction.id },
@@ -52,6 +61,10 @@ router.post('/replicate', async (req, res) => {
 
     if (finalStatus === 'succeeded' && outputUrl) {
       await createAssetForPrediction(updatedPrediction, outputUrl);
+      const transcriptUrl = Array.isArray(output) ? getOutputUrl(output[1]) : undefined;
+      if (prediction.workflow === 'video-caption' && transcriptUrl) {
+        await createSupplementaryAssetForPrediction(updatedPrediction, transcriptUrl, 'document');
+      }
     }
 
     console.log(`Webhook Event processed for prediction ${prediction.id}. Status: ${finalStatus}`);

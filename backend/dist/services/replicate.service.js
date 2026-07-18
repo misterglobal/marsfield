@@ -20,10 +20,7 @@ class ReplicateService {
         // If Replicate token exists, use real API
         if (this.replicate) {
             try {
-                const payload = {
-                    model,
-                    input,
-                };
+                const payload = model.includes(':') ? { version: model.split(':', 2)[1], input } : { model, input };
                 if (webhookUrl) {
                     payload.webhook = webhookUrl;
                     payload.webhook_events_filter = ['completed'];
@@ -33,6 +30,7 @@ class ReplicateService {
                     id: prediction.id,
                     status: prediction.status,
                     outputUrl: this.getOutputUrl(prediction.output),
+                    outputUrls: this.getOutputUrls(prediction.output),
                 };
             }
             catch (error) {
@@ -58,6 +56,7 @@ class ReplicateService {
                     id: prediction.id,
                     status: prediction.status,
                     outputUrl: this.getOutputUrl(prediction.output),
+                    outputUrls: this.getOutputUrls(prediction.output),
                     error: prediction.error,
                 };
             }
@@ -83,6 +82,18 @@ class ReplicateService {
             return candidate.url || candidate.uri;
         }
         return undefined;
+    }
+    getOutputUrls(output) {
+        const values = Array.isArray(output) ? output : [output];
+        return values.map((value) => {
+            if (typeof value === 'string')
+                return value;
+            if (value && typeof value === 'object') {
+                const candidate = value;
+                return candidate.url || candidate.uri || '';
+            }
+            return '';
+        }).filter(Boolean);
     }
     formatReplicateError(error) {
         if (!error || typeof error !== 'object') {

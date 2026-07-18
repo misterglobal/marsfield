@@ -2,7 +2,7 @@ import { Queue, Worker, Job } from 'bullmq';
 import IORedis from 'ioredis';
 import { PrismaClient } from '@prisma/client';
 import { ReplicateService } from './replicate.service';
-import { createAssetForPrediction, storeExistingAssetIfNeeded } from './asset.service';
+import { createAssetForPrediction, createSupplementaryAssetForPrediction, storeExistingAssetIfNeeded } from './asset.service';
 import { storageService } from './storage.service';
 import { thumbnailQueueService } from './thumbnail-queue.service';
 
@@ -192,7 +192,7 @@ export class QueueService {
 
   private async updatePrediction(
     predictionId: string,
-    result: { status: string; outputUrl?: string; error?: string }
+    result: { status: string; outputUrl?: string; outputUrls?: string[]; error?: string }
   ): Promise<boolean> {
     const status =
       result.status === 'succeeded'
@@ -214,6 +214,9 @@ export class QueueService {
 
     if (status === 'succeeded' && prediction.outputUrl) {
       await createAssetForPrediction(prediction, prediction.outputUrl);
+      if (prediction.workflow === 'video-caption' && result.outputUrls?.[1]) {
+        await createSupplementaryAssetForPrediction(prediction, result.outputUrls[1], 'document');
+      }
     }
 
     return isTerminal;

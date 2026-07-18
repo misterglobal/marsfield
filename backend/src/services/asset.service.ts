@@ -21,6 +21,74 @@ type AssetForStorageBackfill = {
   type: string;
 };
 
+export async function createAssetFromBufferForPrediction(
+  prediction: PredictionForAsset,
+  buffer: Buffer,
+  input: {
+    mimeType: string;
+    assetType: 'image' | 'video' | 'audio' | 'document';
+    originalName: string;
+    metadata?: Record<string, string>;
+  }
+): Promise<{ id: string; url: string }> {
+  if (!prediction.userId) throw new Error('Prediction must belong to a user');
+  if (!storageService.isConfigured()) throw new Error('Durable storage must be configured for local processing');
+  const userId = prediction.userId;
+
+  const storedAsset = await storageService.storeBuffer({
+    buffer,
+    userId,
+    mimeType: input.mimeType,
+    assetType: input.assetType,
+    namespace: 'processed',
+    originalName: input.originalName,
+    objectId: prediction.id,
+    metadata: {
+      source: 'marsfield-local-processing',
+      predictionId: prediction.id,
+      ...(input.metadata || {}),
+    },
+  });
+  if (!storedAsset) throw new Error('Durable storage must be configured for local processing');
+
+  const asset = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const storageObject = await tx.storageObject.create({
+      data: {
+        userId,
+        provider: storedAsset.provider,
+        bucket: storedAsset.bucket,
+        key: storedAsset.key,
+        url: storedAsset.url,
+        mimeType: storedAsset.mimeType,
+        byteSize: storedAsset.byteSize,
+        checksum: storedAsset.checksum,
+      },
+    });
+
+    const createdAsset = await tx.asset.create({
+      data: {
+        userId,
+        projectId: prediction.projectId,
+        predictionId: prediction.id,
+        storageObjectId: storageObject.id,
+        url: storedAsset.url,
+        type: input.assetType,
+        fileSize: storedAsset.byteSize,
+      },
+    });
+
+    await tx.user.update({
+      where: { id: userId },
+      data: { storageUsageBytes: { increment: storedAsset.byteSize } },
+    });
+
+    return createdAsset;
+  });
+
+  await thumbnailQueueService.add(asset.id);
+  return { id: asset.id, url: storedAsset.url };
+}
+
 export async function createAssetForPrediction(
   prediction: PredictionForAsset,
   outputUrl: string
@@ -87,6 +155,56 @@ export async function createAssetForPrediction(
   });
 
   await thumbnailQueueService.add(asset.id);
+}
+
+export async function createSupplementaryAssetForPrediction(
+  prediction: PredictionForAsset,
+  outputUrl: string,
+  type: 'document'
+): Promise<void> {
+  if (!prediction.userId) return;
+  const existing = await prisma.asset.findFirst({ where: { predictionId: prediction.id, type } });
+  if (existing) return;
+
+  let storedAsset = null;
+  try {
+    storedAsset = await storageService.storeRemoteAsset({
+      sourceUrl: outputUrl,
+      userId: prediction.userId,
+      predictionId: prediction.id,
+      assetType: type,
+    });
+  } catch (error) {
+    console.error('Supplementary prediction asset storage failed; falling back to provider URL:', error);
+  }
+
+  const userId = prediction.userId;
+  await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const storageObject = storedAsset ? await tx.storageObject.create({
+      data: {
+        userId,
+        provider: storedAsset.provider,
+        bucket: storedAsset.bucket,
+        key: storedAsset.key,
+        url: storedAsset.url,
+        mimeType: storedAsset.mimeType,
+        byteSize: storedAsset.byteSize,
+        checksum: storedAsset.checksum,
+      },
+    }) : null;
+    await tx.asset.create({
+      data: {
+        userId,
+        projectId: prediction.projectId,
+        predictionId: prediction.id,
+        storageObjectId: storageObject?.id,
+        url: storedAsset?.url || outputUrl,
+        type,
+        fileSize: storedAsset?.byteSize,
+      },
+    });
+    if (storedAsset) await tx.user.update({ where: { id: userId }, data: { storageUsageBytes: { increment: storedAsset.byteSize } } });
+  });
 }
 
 export async function storeExistingAssetIfNeeded(asset: AssetForStorageBackfill): Promise<boolean> {

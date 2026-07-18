@@ -1,5 +1,5 @@
-export type WorkflowId = 'text-to-video' | 'image-to-video' | 'lip-sync' | 'text-to-image' | 'multimodal-video' | 'video-edit' | 'video-enhance' | 'image-upscale';
-export type ModelFamily = 'general' | 'seedance' | 'nano-banana' | 'recraft' | 'grok-video' | 'kling-edit' | 'video-enhance' | 'image-upscale';
+export type WorkflowId = 'text-to-video' | 'image-to-video' | 'lip-sync' | 'text-to-image' | 'multimodal-video' | 'video-edit' | 'video-enhance' | 'image-upscale' | 'video-caption' | 'social-resize';
+export type ModelFamily = 'general' | 'seedance' | 'nano-banana' | 'recraft' | 'grok-video' | 'kling-edit' | 'video-enhance' | 'image-upscale' | 'caption' | 'local-processing';
 export type ControlKey = 'target_resolution' | 'target_fps' | 'scale_factor' | 'extension_duration' | 'target_megapixels' | 'enhance_details' | 'enhance_realism' | 'upscale_factor' | 'quality' | 'creativity' | 'output_format';
 
 export interface ModelControl {
@@ -38,6 +38,7 @@ export const MODEL_REGISTRY: readonly ModelDefinition[] = [
   { id: 'minimax/hailuo-live', name: 'Hailuo Live', workflow: 'image-to-video', family: 'general', speed: 'Cinematic', output: 'video', supportsCinematic: true },
   { id: 'bytedance/omni-human', name: 'OmniHuman V1', workflow: 'lip-sync', family: 'general', speed: 'High Fidelity', output: 'video' },
   { id: 'bytedance/omni-human-1.5', name: 'OmniHuman 1.5', workflow: 'lip-sync', family: 'general', speed: 'Latest', output: 'video' },
+  { id: 'prunaai/p-video-avatar', name: 'P-Video Avatar', workflow: 'lip-sync', family: 'general', speed: 'Fast + Low Cost', output: 'video' },
   { id: 'black-forest-labs/flux-schnell', name: 'Flux Schnell', workflow: 'text-to-image', family: 'general', speed: 'Speed', output: 'image', supportsCinematic: true },
   { id: 'stability-ai/stable-diffusion-3', name: 'Stable Diffusion 3', workflow: 'text-to-image', family: 'general', speed: 'Accurate', output: 'image', supportsCinematic: true },
   { id: 'google/nano-banana-2', name: 'Nano Banana 2', workflow: 'text-to-image', family: 'nano-banana', speed: 'Fast + Editing', output: 'image', supportsCinematic: true },
@@ -84,6 +85,8 @@ export const MODEL_REGISTRY: readonly ModelDefinition[] = [
       select('output_format', 'Output Format', 'png', [['PNG', 'png'], ['JPG', 'jpg']]),
     ],
   },
+  { id: 'fictions-ai/autocaption:18a45ff0d95feb4449d192bbdc06b4a6df168fa33def76dfc51b78ae224b599b', name: 'AutoCaption', workflow: 'video-caption', family: 'caption', speed: 'Styled + Transcript', output: 'video' },
+  { id: 'local/ffmpeg-social-resize', name: 'Social Resize', workflow: 'social-resize', family: 'local-processing', speed: 'Free Local Export', output: 'video' },
 ] as const;
 
 export const getModelsForWorkflow = (workflow: string) => MODEL_REGISTRY.filter((model) => model.workflow === workflow);
