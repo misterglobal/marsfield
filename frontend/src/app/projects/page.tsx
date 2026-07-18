@@ -217,7 +217,20 @@ export default function ProjectsPage() {
         })),
       };
       const result = await api.exportTimeline(selectedProject.id, payload);
-      setTimelineResultUrl(result.output_url);
+      let outputUrl = result.output_url || '';
+      if (!outputUrl && result.id) {
+        for (let attempt = 0; attempt < 120; attempt++) {
+          const status = await api.getPrediction(result.id);
+          if (status.status === 'succeeded' && status.output_url) {
+            outputUrl = status.output_url;
+            break;
+          }
+          if (status.status === 'failed') throw new Error(status.error || 'Timeline export failed');
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
+      }
+      if (!outputUrl) throw new Error('Timeline export is taking longer than expected. Check the Asset Library shortly.');
+      setTimelineResultUrl(outputUrl);
       setSelectedProject(await api.getProject(selectedProject.id));
       await loadTimelineAssets(selectedProject.id);
       await loadProjects();

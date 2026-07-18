@@ -4,7 +4,7 @@ const express_1 = require("express");
 const client_1 = require("@prisma/client");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const storage_service_1 = require("../services/storage.service");
-const asset_service_1 = require("../services/asset.service");
+const queue_service_1 = require("../services/queue.service");
 const video_packaging_service_1 = require("../services/video-packaging.service");
 const router = (0, express_1.Router)();
 const prisma = new client_1.PrismaClient();
@@ -178,7 +178,7 @@ router.post('/:id/packaging/thumbnails', auth_middleware_1.authMiddleware, (0, a
             return;
         }
         const times = await (0, video_packaging_service_1.thumbnailCandidateTimes)(asset.url, req.body?.times);
-        const createdAssets = [];
+        const predictions = [];
         for (let index = 0; index < times.length; index++) {
             const time = times[index];
             const prediction = await prisma.prediction.create({
@@ -188,47 +188,20 @@ router.post('/:id/packaging/thumbnails', auth_middleware_1.authMiddleware, (0, a
                     workflow: 'thumbnail-stills',
                     model: 'local/ffmpeg-thumbnail-stills',
                     prompt: `Thumbnail still at ${time}s`,
-                    inputParams: { source_asset_id: asset.id, time_seconds: time },
+                    inputParams: {
+                        source_asset_id: asset.id,
+                        source_url: asset.url,
+                        time_seconds: time,
+                        index: index + 1,
+                    },
                     creditCost: 0,
                     status: 'processing',
                 },
             });
-            try {
-                const buffer = await (0, video_packaging_service_1.extractThumbnailStill)({ sourceUrl: asset.url, timeSeconds: time });
-                const created = await (0, asset_service_1.createAssetFromBufferForPrediction)(prediction, buffer, {
-                    mimeType: 'image/jpeg',
-                    assetType: 'image',
-                    originalName: `thumbnail-still-${index + 1}.jpg`,
-                    metadata: {
-                        workflow: 'thumbnail-stills',
-                        sourceAssetId: asset.id,
-                        timeSeconds: String(time),
-                    },
-                });
-                await prisma.prediction.update({
-                    where: { id: prediction.id },
-                    data: { status: 'succeeded', outputUrl: created.url, completedAt: new Date() },
-                });
-                await prisma.usageEvent.create({
-                    data: {
-                        userId: user.id,
-                        predictionId: prediction.id,
-                        eventType: 'generation_completed',
-                        credits: 0,
-                        metadata: { workflow: 'thumbnail-stills', source_asset_id: asset.id, time_seconds: time },
-                    },
-                });
-                createdAssets.push({ ...created, time_seconds: time });
-            }
-            catch (error) {
-                await prisma.prediction.update({
-                    where: { id: prediction.id },
-                    data: { status: 'failed', errorMessage: error instanceof Error ? error.message : 'Thumbnail extraction failed', completedAt: new Date() },
-                });
-                throw error;
-            }
+            predictions.push({ id: prediction.id, status: prediction.status, time_seconds: time });
+            await queue_service_1.queueService.addLocalProcessingJob({ kind: 'local', predictionId: prediction.id });
         }
-        res.status(201).json({ assets: createdAssets });
+        res.status(202).json({ predictions, credits_charged: 0 });
     }
     catch (error) {
         console.error('Video thumbnail stills error:', error);
@@ -261,41 +234,18 @@ router.post('/:id/packaging/title-overlay', auth_middleware_1.authMiddleware, (0
                 workflow: 'title-overlay',
                 model: 'local/ffmpeg-title-overlay',
                 prompt: title,
-                inputParams: { source_asset_id: asset.id, title, subtitle },
+                inputParams: {
+                    source_asset_id: asset.id,
+                    source_url: asset.url,
+                    title,
+                    subtitle,
+                },
                 creditCost: 0,
                 status: 'processing',
             },
         });
-        try {
-            const buffer = await (0, video_packaging_service_1.renderTitleOverlayVideo)({ sourceUrl: asset.url, title, subtitle });
-            const created = await (0, asset_service_1.createAssetFromBufferForPrediction)(prediction, buffer, {
-                mimeType: 'video/mp4',
-                assetType: 'video',
-                originalName: 'title-overlay.mp4',
-                metadata: { workflow: 'title-overlay', sourceAssetId: asset.id },
-            });
-            await prisma.prediction.update({
-                where: { id: prediction.id },
-                data: { status: 'succeeded', outputUrl: created.url, completedAt: new Date() },
-            });
-            await prisma.usageEvent.create({
-                data: {
-                    userId: user.id,
-                    predictionId: prediction.id,
-                    eventType: 'generation_completed',
-                    credits: 0,
-                    metadata: { workflow: 'title-overlay', source_asset_id: asset.id },
-                },
-            });
-            res.status(201).json({ id: prediction.id, status: 'succeeded', output_url: created.url, asset_id: created.id, credits_charged: 0 });
-        }
-        catch (error) {
-            await prisma.prediction.update({
-                where: { id: prediction.id },
-                data: { status: 'failed', errorMessage: error instanceof Error ? error.message : 'Title overlay render failed', completedAt: new Date() },
-            });
-            throw error;
-        }
+        await queue_service_1.queueService.addLocalProcessingJob({ kind: 'local', predictionId: prediction.id });
+        res.status(202).json({ id: prediction.id, status: prediction.status, output_url: prediction.outputUrl, credits_charged: 0 });
     }
     catch (error) {
         console.error('Video title overlay error:', error);

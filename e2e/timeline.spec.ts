@@ -32,16 +32,18 @@ test('exports a reordered trimmed project timeline from owned video assets', asy
   await page.route('**/api/v1/projects/project-1/timeline-export', async (route) => {
     exportPayload = route.request().postDataJSON();
     return route.fulfill({
-      status: 201,
+      status: 202,
       json: {
         id: 'timeline-prediction',
-        status: 'succeeded',
-        output_url: 'https://media.test/final.mp4',
-        asset_id: 'timeline-asset',
+        status: 'processing',
+        output_url: null,
         credits_charged: 0,
       },
     });
   });
+  await page.route('**/api/v1/predictions/timeline-prediction', (route) => route.fulfill({
+    json: { id: 'timeline-prediction', status: 'succeeded', output_url: 'https://media.test/final.mp4' },
+  }));
 
   await page.goto('/projects');
   await page.getByRole('button', { name: /Opening shot/ }).click();
@@ -123,16 +125,18 @@ test('adds generated storyboard results to the timeline in scene order', async (
   await page.route('**/api/v1/projects/project-1/timeline-export', async (route) => {
     exportPayload = route.request().postDataJSON();
     return route.fulfill({
-      status: 201,
+      status: 202,
       json: {
         id: 'timeline-prediction',
-        status: 'succeeded',
-        output_url: 'https://media.test/final-storyboard.mp4',
-        asset_id: 'timeline-asset',
+        status: 'processing',
+        output_url: null,
         credits_charged: 0,
       },
     });
   });
+  await page.route('**/api/v1/predictions/timeline-prediction', (route) => route.fulfill({
+    json: { id: 'timeline-prediction', status: 'succeeded', output_url: 'https://media.test/final-storyboard.mp4' },
+  }));
 
   await page.goto('/projects');
   await page.getByRole('button', { name: 'Add storyboard results' }).click();

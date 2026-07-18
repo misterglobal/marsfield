@@ -2,18 +2,34 @@ import { Queue, Worker, Job } from 'bullmq';
 import IORedis from 'ioredis';
 import { PrismaClient } from '@prisma/client';
 import { ReplicateService } from './replicate.service';
-import { createAssetForPrediction, createSupplementaryAssetForPrediction, storeExistingAssetIfNeeded } from './asset.service';
+import {
+  createAssetForPrediction,
+  createAssetFromBufferForPrediction,
+  createSupplementaryAssetForPrediction,
+  storeExistingAssetIfNeeded,
+} from './asset.service';
 import { storageService } from './storage.service';
 import { thumbnailQueueService } from './thumbnail-queue.service';
+import { assertSocialResizeFormat, assertSocialResizeMode, renderSocialResize } from './social-resize.service';
+import { normalizeTimelineClip, renderTimelineExport } from './timeline-export.service';
+import { extractThumbnailStill, renderTitleOverlayVideo } from './video-packaging.service';
 
 const prisma = new PrismaClient();
 const replicateService = new ReplicateService();
 
 interface GenerationJobData {
+  kind?: 'replicate';
   predictionId: string;
   replicatePredictionId: string;
   model?: string;
 }
+
+interface LocalProcessingJobData {
+  kind: 'local';
+  predictionId: string;
+}
+
+type QueueJobData = GenerationJobData | LocalProcessingJobData;
 
 export class QueueService {
   private queue: Queue | null = null;
@@ -38,7 +54,7 @@ export class QueueService {
       this.worker = new Worker(
         'generations',
         async (job: Job) => {
-          await this.processJob(job.data);
+          await this.processJob(job.data as QueueJobData);
         },
         { connection: connection as any }
       );
@@ -60,6 +76,18 @@ export class QueueService {
     }
 
     await this.queue.add(`job-${data.predictionId}`, data);
+  }
+
+  public async addLocalProcessingJob(data: LocalProcessingJobData): Promise<void> {
+    if (this.isFallback || !this.queue) {
+      console.log(`Fallback: Processing local job in memory: ${data.predictionId}`);
+      void this.processLocalJob(data).catch((err) => {
+        console.error('In-memory local processing failed:', err);
+      });
+      return;
+    }
+
+    await this.queue.add(`local-${data.predictionId}`, data);
   }
 
   public async resumeIncompleteJobs(): Promise<void> {
@@ -149,17 +177,127 @@ export class QueueService {
     if (incompletePredictions.length > 0) {
       console.log(`Resumed ${incompletePredictions.length} incomplete generation job(s).`);
     }
+
+    const incompleteLocalPredictions = await prisma.prediction.findMany({
+      where: {
+        status: 'processing',
+        replicatePredictionId: null,
+        model: { in: ['local/ffmpeg-social-resize', 'local/ffmpeg-timeline', 'local/ffmpeg-title-overlay', 'local/ffmpeg-thumbnail-stills'] },
+      },
+      select: { id: true },
+      take: 25,
+    });
+    for (const prediction of incompleteLocalPredictions) {
+      await this.addLocalProcessingJob({ kind: 'local', predictionId: prediction.id });
+    }
+    if (incompleteLocalPredictions.length > 0) {
+      console.log(`Resumed ${incompleteLocalPredictions.length} incomplete local processing job(s).`);
+    }
     if (completedWithoutAssets.length > 0) {
       console.log(`Restored ${completedWithoutAssets.length} missing library asset(s).`);
     }
   }
 
-  private async processJob(data: GenerationJobData): Promise<void> {
+  private async processJob(data: QueueJobData): Promise<void> {
+    if ('kind' in data && data.kind === 'local') {
+      await this.processLocalJob(data);
+      return;
+    }
+
     console.log(`Processing background job for prediction: ${data.predictionId}`);
     try {
       await this.pollUntilComplete(data);
     } catch (error) {
       console.error(`Failed executing background prediction job ${data.predictionId}:`, error);
+      throw error;
+    }
+  }
+
+  private async processLocalJob(data: LocalProcessingJobData): Promise<void> {
+    const prediction = await prisma.prediction.findUnique({
+      where: { id: data.predictionId },
+    });
+    if (!prediction || ['succeeded', 'failed'].includes(prediction.status)) return;
+
+    const params = (prediction.inputParams || {}) as Record<string, any>;
+
+    try {
+      let outputBuffer: Buffer;
+      let mimeType = 'video/mp4';
+      let assetType: 'image' | 'video' = 'video';
+      let originalName = 'processed-video.mp4';
+      let metadata: Record<string, string> = { workflow: prediction.workflow };
+
+      if (prediction.model === 'local/ffmpeg-social-resize') {
+        const sourceUrl = String(params.source_url || '');
+        if (!sourceUrl) throw new Error('Social resize source video is missing');
+        const format = assertSocialResizeFormat(params.format);
+        const mode = assertSocialResizeMode(params.mode);
+        outputBuffer = await renderSocialResize({ sourceUrl, format, mode });
+        originalName = `social-resize-${format}-${mode}.mp4`;
+        metadata = { workflow: prediction.workflow, format, mode, batch: params.batch ? 'true' : 'false' };
+      } else if (prediction.model === 'local/ffmpeg-timeline') {
+        const requestedClips = Array.isArray(params.clips) ? params.clips : [];
+        const clips = requestedClips.map((clip) => normalizeTimelineClip({
+          sourceUrl: String(clip.source_url || ''),
+          startSeconds: clip.start_seconds,
+          endSeconds: clip.end_seconds,
+        }));
+        outputBuffer = await renderTimelineExport(clips);
+        originalName = 'timeline-export.mp4';
+        metadata = { workflow: prediction.workflow, clipCount: String(clips.length) };
+      } else if (prediction.model === 'local/ffmpeg-title-overlay') {
+        const sourceUrl = String(params.source_url || '');
+        const title = String(params.title || '');
+        if (!sourceUrl) throw new Error('Title overlay source video is missing');
+        outputBuffer = await renderTitleOverlayVideo({ sourceUrl, title, subtitle: String(params.subtitle || '') });
+        originalName = 'title-overlay.mp4';
+        metadata = { workflow: prediction.workflow, sourceAssetId: String(params.source_asset_id || '') };
+      } else if (prediction.model === 'local/ffmpeg-thumbnail-stills') {
+        const sourceUrl = String(params.source_url || '');
+        const timeSeconds = Number(params.time_seconds || 0);
+        if (!sourceUrl) throw new Error('Thumbnail source video is missing');
+        outputBuffer = await extractThumbnailStill({ sourceUrl, timeSeconds });
+        mimeType = 'image/jpeg';
+        assetType = 'image';
+        originalName = `thumbnail-still-${params.index ?? 1}.jpg`;
+        metadata = {
+          workflow: prediction.workflow,
+          sourceAssetId: String(params.source_asset_id || ''),
+          timeSeconds: String(timeSeconds),
+        };
+      } else {
+        throw new Error(`Unsupported local processing model: ${prediction.model}`);
+      }
+
+      const asset = await createAssetFromBufferForPrediction(prediction, outputBuffer, {
+        mimeType,
+        assetType,
+        originalName,
+        metadata,
+      });
+      await prisma.prediction.update({
+        where: { id: prediction.id },
+        data: { status: 'succeeded', outputUrl: asset.url, completedAt: new Date() },
+      });
+      await prisma.usageEvent.create({
+        data: {
+          userId: prediction.userId!,
+          predictionId: prediction.id,
+          eventType: 'generation',
+          credits: 0,
+          metadata: { workflow: prediction.workflow, model: prediction.model, local_processing: true },
+        },
+      });
+    } catch (error) {
+      await prisma.prediction.update({
+        where: { id: prediction.id },
+        data: {
+          status: 'failed',
+          errorMessage: error instanceof Error ? error.message : 'Local processing failed',
+          completedAt: new Date(),
+        },
+      });
       throw error;
     }
   }

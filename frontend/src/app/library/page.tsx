@@ -116,6 +116,16 @@ export default function LibraryPage() {
     }));
   };
 
+  const waitForPrediction = async (predictionId: string) => {
+    for (let attempt = 0; attempt < 120; attempt++) {
+      const status = await api.getPrediction(predictionId);
+      if (status.status === 'succeeded') return status;
+      if (status.status === 'failed') throw new Error(status.error || 'Local processing failed');
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+    throw new Error('Processing is taking longer than expected. Check the library shortly.');
+  };
+
   const generatePackagingIdeas = async (asset: AssetData) => {
     updatePackaging(asset.id, { loading: 'ideas', error: '', message: '' });
     try {
@@ -136,9 +146,11 @@ export default function LibraryPage() {
     updatePackaging(asset.id, { loading: 'thumbnails', error: '', message: '' });
     try {
       const result = await api.createVideoThumbnailStills(asset.id);
+      const predictions = Array.isArray(result.predictions) ? result.predictions : [];
+      await Promise.all(predictions.map((prediction: any) => waitForPrediction(prediction.id)));
       updatePackaging(asset.id, {
         loading: '',
-        message: `Saved ${result.assets?.length || 0} thumbnail stills to your library.`,
+        message: `Saved ${predictions.length || 0} thumbnail stills to your library.`,
       });
       await fetchAssets();
     } catch (err: any) {
@@ -154,10 +166,11 @@ export default function LibraryPage() {
     }
     updatePackaging(asset.id, { loading: 'overlay', error: '', message: '' });
     try {
-      await api.createTitleOverlay(asset.id, {
+      const result = await api.createTitleOverlay(asset.id, {
         title: current.title,
         subtitle: current.subtitle,
       });
+      if (result.id) await waitForPrediction(result.id);
       updatePackaging(asset.id, { loading: '', message: 'Title-overlay video saved to your library.' });
       await fetchAssets();
     } catch (err: any) {

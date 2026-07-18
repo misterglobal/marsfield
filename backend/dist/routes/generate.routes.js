@@ -651,79 +651,49 @@ router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1
             const mode = (0, social_resize_service_1.assertSocialResizeMode)(predictionInput.mode);
             const resizeGroupId = formats.length > 1 ? (0, crypto_1.randomUUID)() : undefined;
             const submittedPredictions = [];
-            const createdPredictionIds = [];
-            try {
-                for (let index = 0; index < formats.length; index++) {
-                    const format = formats[index];
-                    const prediction = await prisma.prediction.create({
-                        data: {
-                            userId: user.id,
-                            projectId,
-                            storyboardSceneId,
-                            workflow,
-                            model,
-                            prompt: `Resize video for ${(0, social_resize_service_1.socialResizeLabel)(format)} (${mode})`,
-                            inputParams: {
-                                format,
-                                mode,
-                                aspect_ratio: (0, social_resize_service_1.socialResizeLabel)(format),
-                                source_video_storage_object_id: req.body.video_storage_object_id,
-                            },
-                            variationGroupId: resizeGroupId,
-                            variationIndex: index,
-                            variationCount: formats.length,
-                            creditCost: 0,
-                            status: 'processing',
-                        },
-                    });
-                    createdPredictionIds.push(prediction.id);
-                    const outputBuffer = await (0, social_resize_service_1.renderSocialResize)({ sourceUrl: sourceVideo, format, mode });
-                    const asset = await (0, asset_service_1.createAssetFromBufferForPrediction)(prediction, outputBuffer, {
-                        mimeType: 'video/mp4',
-                        assetType: 'video',
-                        originalName: `social-resize-${format}-${mode}.mp4`,
-                        metadata: { workflow, format, mode, batch: formats.length > 1 ? 'true' : 'false' },
-                    });
-                    const completedPrediction = await prisma.prediction.update({
-                        where: { id: prediction.id },
-                        data: { status: 'succeeded', outputUrl: asset.url, completedAt: new Date() },
-                    });
-                    submittedPredictions.push(completedPrediction);
-                }
-                await prisma.usageEvent.create({
+            for (let index = 0; index < formats.length; index++) {
+                const format = formats[index];
+                const prediction = await prisma.prediction.create({
                     data: {
                         userId: user.id,
-                        predictionId: submittedPredictions[0]?.id,
-                        eventType: 'generation',
-                        credits: 0,
-                        metadata: { workflow, model, formats, mode, variation_group_id: resizeGroupId },
+                        projectId,
+                        storyboardSceneId,
+                        workflow,
+                        model,
+                        prompt: `Resize video for ${(0, social_resize_service_1.socialResizeLabel)(format)} (${mode})`,
+                        inputParams: {
+                            format,
+                            mode,
+                            aspect_ratio: (0, social_resize_service_1.socialResizeLabel)(format),
+                            source_url: sourceVideo,
+                            source_video_storage_object_id: req.body.video_storage_object_id,
+                            batch: formats.length > 1,
+                        },
+                        variationGroupId: resizeGroupId,
+                        variationIndex: index,
+                        variationCount: formats.length,
+                        creditCost: 0,
+                        status: 'processing',
                     },
                 });
-                const primaryPrediction = submittedPredictions[0];
-                res.status(201).json({
-                    id: primaryPrediction.id,
-                    status: primaryPrediction.status,
-                    output_url: primaryPrediction.outputUrl,
-                    created_at: primaryPrediction.createdAt,
-                    credits_charged: 0,
-                    variation_group_id: resizeGroupId,
-                    predictions: submittedPredictions.map((prediction) => ({
-                        id: prediction.id,
-                        status: prediction.status,
-                        output_url: prediction.outputUrl,
-                        variation_index: prediction.variationIndex,
-                    })),
-                });
+                submittedPredictions.push(prediction);
+                await queue_service_1.queueService.addLocalProcessingJob({ kind: 'local', predictionId: prediction.id });
             }
-            catch (error) {
-                await Promise.all(createdPredictionIds
-                    .filter((id) => !submittedPredictions.some((prediction) => prediction.id === id && prediction.status === 'succeeded'))
-                    .map((id) => prisma.prediction.update({
-                    where: { id },
-                    data: { status: 'failed', errorMessage: error instanceof Error ? error.message : 'Social resize failed', completedAt: new Date() },
-                })));
-                throw error;
-            }
+            const primaryPrediction = submittedPredictions[0];
+            res.status(202).json({
+                id: primaryPrediction.id,
+                status: primaryPrediction.status,
+                output_url: primaryPrediction.outputUrl,
+                created_at: primaryPrediction.createdAt,
+                credits_charged: 0,
+                variation_group_id: resizeGroupId,
+                predictions: submittedPredictions.map((prediction) => ({
+                    id: prediction.id,
+                    status: prediction.status,
+                    output_url: prediction.outputUrl,
+                    variation_index: prediction.variationIndex,
+                })),
+            });
             return;
         }
         // Call replicate client wrapper

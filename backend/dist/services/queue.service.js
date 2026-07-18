@@ -11,6 +11,9 @@ const replicate_service_1 = require("./replicate.service");
 const asset_service_1 = require("./asset.service");
 const storage_service_1 = require("./storage.service");
 const thumbnail_queue_service_1 = require("./thumbnail-queue.service");
+const social_resize_service_1 = require("./social-resize.service");
+const timeline_export_service_1 = require("./timeline-export.service");
+const video_packaging_service_1 = require("./video-packaging.service");
 const prisma = new client_1.PrismaClient();
 const replicateService = new replicate_service_1.ReplicateService();
 class QueueService {
@@ -49,6 +52,16 @@ class QueueService {
             return;
         }
         await this.queue.add(`job-${data.predictionId}`, data);
+    }
+    async addLocalProcessingJob(data) {
+        if (this.isFallback || !this.queue) {
+            console.log(`Fallback: Processing local job in memory: ${data.predictionId}`);
+            void this.processLocalJob(data).catch((err) => {
+                console.error('In-memory local processing failed:', err);
+            });
+            return;
+        }
+        await this.queue.add(`local-${data.predictionId}`, data);
     }
     async resumeIncompleteJobs() {
         if (storage_service_1.storageService.isConfigured()) {
@@ -131,17 +144,129 @@ class QueueService {
         if (incompletePredictions.length > 0) {
             console.log(`Resumed ${incompletePredictions.length} incomplete generation job(s).`);
         }
+        const incompleteLocalPredictions = await prisma.prediction.findMany({
+            where: {
+                status: 'processing',
+                replicatePredictionId: null,
+                model: { in: ['local/ffmpeg-social-resize', 'local/ffmpeg-timeline', 'local/ffmpeg-title-overlay', 'local/ffmpeg-thumbnail-stills'] },
+            },
+            select: { id: true },
+            take: 25,
+        });
+        for (const prediction of incompleteLocalPredictions) {
+            await this.addLocalProcessingJob({ kind: 'local', predictionId: prediction.id });
+        }
+        if (incompleteLocalPredictions.length > 0) {
+            console.log(`Resumed ${incompleteLocalPredictions.length} incomplete local processing job(s).`);
+        }
         if (completedWithoutAssets.length > 0) {
             console.log(`Restored ${completedWithoutAssets.length} missing library asset(s).`);
         }
     }
     async processJob(data) {
+        if ('kind' in data && data.kind === 'local') {
+            await this.processLocalJob(data);
+            return;
+        }
         console.log(`Processing background job for prediction: ${data.predictionId}`);
         try {
             await this.pollUntilComplete(data);
         }
         catch (error) {
             console.error(`Failed executing background prediction job ${data.predictionId}:`, error);
+            throw error;
+        }
+    }
+    async processLocalJob(data) {
+        const prediction = await prisma.prediction.findUnique({
+            where: { id: data.predictionId },
+        });
+        if (!prediction || ['succeeded', 'failed'].includes(prediction.status))
+            return;
+        const params = (prediction.inputParams || {});
+        try {
+            let outputBuffer;
+            let mimeType = 'video/mp4';
+            let assetType = 'video';
+            let originalName = 'processed-video.mp4';
+            let metadata = { workflow: prediction.workflow };
+            if (prediction.model === 'local/ffmpeg-social-resize') {
+                const sourceUrl = String(params.source_url || '');
+                if (!sourceUrl)
+                    throw new Error('Social resize source video is missing');
+                const format = (0, social_resize_service_1.assertSocialResizeFormat)(params.format);
+                const mode = (0, social_resize_service_1.assertSocialResizeMode)(params.mode);
+                outputBuffer = await (0, social_resize_service_1.renderSocialResize)({ sourceUrl, format, mode });
+                originalName = `social-resize-${format}-${mode}.mp4`;
+                metadata = { workflow: prediction.workflow, format, mode, batch: params.batch ? 'true' : 'false' };
+            }
+            else if (prediction.model === 'local/ffmpeg-timeline') {
+                const requestedClips = Array.isArray(params.clips) ? params.clips : [];
+                const clips = requestedClips.map((clip) => (0, timeline_export_service_1.normalizeTimelineClip)({
+                    sourceUrl: String(clip.source_url || ''),
+                    startSeconds: clip.start_seconds,
+                    endSeconds: clip.end_seconds,
+                }));
+                outputBuffer = await (0, timeline_export_service_1.renderTimelineExport)(clips);
+                originalName = 'timeline-export.mp4';
+                metadata = { workflow: prediction.workflow, clipCount: String(clips.length) };
+            }
+            else if (prediction.model === 'local/ffmpeg-title-overlay') {
+                const sourceUrl = String(params.source_url || '');
+                const title = String(params.title || '');
+                if (!sourceUrl)
+                    throw new Error('Title overlay source video is missing');
+                outputBuffer = await (0, video_packaging_service_1.renderTitleOverlayVideo)({ sourceUrl, title, subtitle: String(params.subtitle || '') });
+                originalName = 'title-overlay.mp4';
+                metadata = { workflow: prediction.workflow, sourceAssetId: String(params.source_asset_id || '') };
+            }
+            else if (prediction.model === 'local/ffmpeg-thumbnail-stills') {
+                const sourceUrl = String(params.source_url || '');
+                const timeSeconds = Number(params.time_seconds || 0);
+                if (!sourceUrl)
+                    throw new Error('Thumbnail source video is missing');
+                outputBuffer = await (0, video_packaging_service_1.extractThumbnailStill)({ sourceUrl, timeSeconds });
+                mimeType = 'image/jpeg';
+                assetType = 'image';
+                originalName = `thumbnail-still-${params.index ?? 1}.jpg`;
+                metadata = {
+                    workflow: prediction.workflow,
+                    sourceAssetId: String(params.source_asset_id || ''),
+                    timeSeconds: String(timeSeconds),
+                };
+            }
+            else {
+                throw new Error(`Unsupported local processing model: ${prediction.model}`);
+            }
+            const asset = await (0, asset_service_1.createAssetFromBufferForPrediction)(prediction, outputBuffer, {
+                mimeType,
+                assetType,
+                originalName,
+                metadata,
+            });
+            await prisma.prediction.update({
+                where: { id: prediction.id },
+                data: { status: 'succeeded', outputUrl: asset.url, completedAt: new Date() },
+            });
+            await prisma.usageEvent.create({
+                data: {
+                    userId: prediction.userId,
+                    predictionId: prediction.id,
+                    eventType: 'generation',
+                    credits: 0,
+                    metadata: { workflow: prediction.workflow, model: prediction.model, local_processing: true },
+                },
+            });
+        }
+        catch (error) {
+            await prisma.prediction.update({
+                where: { id: prediction.id },
+                data: {
+                    status: 'failed',
+                    errorMessage: error instanceof Error ? error.message : 'Local processing failed',
+                    completedAt: new Date(),
+                },
+            });
             throw error;
         }
     }

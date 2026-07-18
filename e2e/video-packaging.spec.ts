@@ -25,15 +25,17 @@ test('packages a video with hooks, title overlay, and thumbnail still assets', a
     },
     'POST /api/v1/assets/video-package/packaging/thumbnails': async (route) => {
       thumbnailRequested = true;
-      await route.fulfill({ status: 201, json: { assets: [{ id: 'thumb-1', url: 'https://media.test/thumb.jpg', time_seconds: 1.5 }] } });
+      await route.fulfill({ status: 202, json: { predictions: [{ id: 'thumb-prediction', status: 'processing', time_seconds: 1.5 }] } });
     },
     'POST /api/v1/assets/video-package/packaging/title-overlay': async (route) => {
       overlayPayload = route.request().postDataJSON();
       await route.fulfill({
-        status: 201,
-        json: { id: 'overlay-prediction', status: 'succeeded', output_url: 'https://media.test/overlay.mp4', asset_id: 'overlay-asset', credits_charged: 0 },
+        status: 202,
+        json: { id: 'overlay-prediction', status: 'processing', output_url: null, credits_charged: 0 },
       });
     },
+    'GET /api/v1/predictions/thumb-prediction': { id: 'thumb-prediction', status: 'succeeded', output_url: 'https://media.test/thumb.jpg' },
+    'GET /api/v1/predictions/overlay-prediction': { id: 'overlay-prediction', status: 'succeeded', output_url: 'https://media.test/overlay.mp4' },
   });
 
   await page.goto('/library');

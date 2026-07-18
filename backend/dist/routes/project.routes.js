@@ -4,7 +4,7 @@ const express_1 = require("express");
 const client_1 = require("@prisma/client");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const storyboard_planner_service_1 = require("../services/storyboard-planner.service");
-const asset_service_1 = require("../services/asset.service");
+const queue_service_1 = require("../services/queue.service");
 const timeline_export_service_1 = require("../services/timeline-export.service");
 const router = (0, express_1.Router)();
 const prisma = new client_1.PrismaClient();
@@ -308,6 +308,7 @@ router.post('/:id/timeline-export', auth_middleware_1.authMiddleware, (0, auth_m
                     clips: requestedClips.map((clip, index) => ({
                         asset_id: String(clip.asset_id || ''),
                         index,
+                        source_url: clips[index].sourceUrl,
                         start_seconds: clips[index].startSeconds,
                         end_seconds: clips[index].endSeconds ?? null,
                     })),
@@ -319,42 +320,13 @@ router.post('/:id/timeline-export', auth_middleware_1.authMiddleware, (0, auth_m
                 status: 'processing',
             },
         });
-        try {
-            const outputBuffer = await (0, timeline_export_service_1.renderTimelineExport)(clips);
-            const asset = await (0, asset_service_1.createAssetFromBufferForPrediction)(prediction, outputBuffer, {
-                mimeType: 'video/mp4',
-                assetType: 'video',
-                originalName: 'timeline-export.mp4',
-                metadata: { workflow: 'timeline-export', clipCount: String(clips.length) },
-            });
-            const completedPrediction = await prisma.prediction.update({
-                where: { id: prediction.id },
-                data: { status: 'succeeded', outputUrl: asset.url, completedAt: new Date() },
-            });
-            await prisma.usageEvent.create({
-                data: {
-                    userId: user.id,
-                    predictionId: prediction.id,
-                    eventType: 'generation',
-                    credits: 0,
-                    metadata: { workflow: 'timeline-export', model: 'local/ffmpeg-timeline', clip_count: clips.length },
-                },
-            });
-            res.status(201).json({
-                id: completedPrediction.id,
-                status: completedPrediction.status,
-                output_url: completedPrediction.outputUrl,
-                asset_id: asset.id,
-                credits_charged: 0,
-            });
-        }
-        catch (error) {
-            await prisma.prediction.update({
-                where: { id: prediction.id },
-                data: { status: 'failed', errorMessage: error instanceof Error ? error.message : 'Timeline export failed', completedAt: new Date() },
-            });
-            throw error;
-        }
+        await queue_service_1.queueService.addLocalProcessingJob({ kind: 'local', predictionId: prediction.id });
+        res.status(202).json({
+            id: prediction.id,
+            status: prediction.status,
+            output_url: prediction.outputUrl,
+            credits_charged: 0,
+        });
     }
     catch (error) {
         console.error('Timeline export error:', error);
