@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authMiddleware, AuthenticatedRequest, requireScope } from '../middleware/auth.middleware';
 import { planYoutubeProduction } from '../services/youtube-planner.service';
+import { createYoutubeNarrationPackage } from '../services/youtube-narration.service';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -135,6 +136,52 @@ router.post('/productions/:id/create-project', authMiddleware, requireScope('pro
   } catch (error) {
     console.error('Create project from YouTube production error:', error);
     res.status(500).json({ error: 'Failed creating project from YouTube production' });
+  }
+});
+
+// POST /api/v1/youtube/productions/:id/narration-package
+router.post('/productions/:id/narration-package', authMiddleware, requireScope('projects:write'), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.user) return void res.status(401).json({ error: 'Unauthorized' });
+    const production = await prisma.youtubeProduction.findFirst({
+      where: { id: req.params.id, userId: req.user.id },
+    });
+    if (!production) return void res.status(404).json({ error: 'Production not found' });
+
+    const narrationPackage = createYoutubeNarrationPackage({
+      script: production.script,
+      storyboard: production.storyboard,
+      targetDurationMin: production.targetDurationMin,
+      wordsPerMinute: Number(req.body.words_per_minute || 150),
+    });
+
+    const updated = await prisma.youtubeProduction.update({
+      where: { id: production.id },
+      data: {
+        narration: narrationPackage.narration,
+        captions: narrationPackage.captions,
+        audio: narrationPackage.audio,
+        status: production.status === 'planned' ? 'narration_prepared' : production.status,
+      },
+    });
+
+    await prisma.usageEvent.create({
+      data: {
+        userId: req.user.id,
+        eventType: 'youtube_narration_package',
+        credits: 0,
+        metadata: {
+          production_id: production.id,
+          estimated_duration_seconds: narrationPackage.narration.estimatedDurationSeconds,
+          caption_count: narrationPackage.captions.count,
+        },
+      },
+    });
+
+    res.status(201).json({ ...updated, credits_charged: 0 });
+  } catch (error) {
+    console.error('Create YouTube narration package error:', error);
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Failed preparing narration package' });
   }
 });
 

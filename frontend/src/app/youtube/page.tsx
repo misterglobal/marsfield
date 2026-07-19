@@ -20,6 +20,9 @@ interface YoutubeProduction extends YoutubeProductionSummary {
   strategy: any;
   script: any;
   storyboard: any[];
+  narration?: any;
+  captions?: any;
+  audio?: any;
   seo: any;
   thumbnailConcepts: any[];
 }
@@ -35,6 +38,8 @@ export default function YoutubePlannerPage() {
   const [loading, setLoading] = useState(false);
   const [planning, setPlanning] = useState(false);
   const [projectCreating, setProjectCreating] = useState(false);
+  const [narrationPreparing, setNarrationPreparing] = useState(false);
+  const [wordsPerMinute, setWordsPerMinute] = useState(150);
   const [error, setError] = useState('');
 
   const loadProductions = useCallback(async () => {
@@ -99,6 +104,21 @@ export default function YoutubePlannerPage() {
       setError(err.message || 'Failed creating project from production');
     } finally {
       setProjectCreating(false);
+    }
+  };
+
+  const prepareNarrationPackage = async () => {
+    if (!selected) return;
+    setNarrationPreparing(true);
+    setError('');
+    try {
+      const production = await api.createYoutubeNarrationPackage(selected.id, { words_per_minute: wordsPerMinute });
+      setSelected(production);
+      await loadProductions();
+    } catch (err: any) {
+      setError(err.message || 'Failed preparing narration package');
+    } finally {
+      setNarrationPreparing(false);
     }
   };
 
@@ -228,6 +248,54 @@ export default function YoutubePlannerPage() {
                   </div>
                 ))}
               </div>
+            </section>
+
+            <section className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                <div>
+                  <h3 style={{ margin: 0 }}>Narration + Captions Prep</h3>
+                  <p style={{ margin: '0.35rem 0 0', color: 'var(--foreground-muted)', fontSize: '0.84rem' }}>
+                    Phase 3 foundation: prepare TTS-safe narration, draft SRT captions, and recalibrated scene timing. 0 credits.
+                  </p>
+                </div>
+                <div style={{ display: 'flex', gap: '0.55rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <label style={{ color: 'var(--foreground-muted)', fontSize: '0.78rem' }}>
+                    WPM
+                    <input className="form-input" aria-label="Narration words per minute" type="number" min={90} max={210} value={wordsPerMinute} onChange={(event) => setWordsPerMinute(Number(event.target.value))} style={{ width: 92, marginTop: '0.25rem' }} />
+                  </label>
+                  <button className="btn btn-primary" type="button" onClick={() => void prepareNarrationPackage()} disabled={narrationPreparing}>
+                    {narrationPreparing ? 'Preparing...' : selected.narration ? 'Regenerate package' : 'Prepare narration package'}
+                  </button>
+                </div>
+              </div>
+
+              {selected.narration && (
+                <>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <span className="badge badge-purple">{selected.narration.totalWords} words</span>
+                    <span className="badge badge-purple">{Math.round(selected.narration.estimatedDurationSeconds / 60)} min estimated audio</span>
+                    <span className="badge badge-purple">{selected.captions?.count || 0} caption cues</span>
+                    <span className="badge badge-purple">audio {selected.audio?.status || 'not generated'}</span>
+                  </div>
+                  <textarea className="form-textarea" aria-label="TTS narration text" readOnly rows={6} value={selected.narration.ttsText || ''} />
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.75rem' }}>
+                    <div style={{ border: '1px solid var(--panel-border)', borderRadius: 12, padding: '0.8rem' }}>
+                      <strong>SRT preview</strong>
+                      <pre style={{ whiteSpace: 'pre-wrap', color: 'var(--foreground-muted)', fontSize: '0.72rem', maxHeight: 220, overflowY: 'auto' }}>{selected.captions?.srt?.slice(0, 1200)}</pre>
+                    </div>
+                    <div style={{ border: '1px solid var(--panel-border)', borderRadius: 12, padding: '0.8rem' }}>
+                      <strong>Scene timing preview</strong>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', marginTop: '0.5rem' }}>
+                        {selected.audio?.sceneTiming?.slice(0, 8).map((scene: any) => (
+                          <small key={scene.index} style={{ color: 'var(--foreground-muted)' }}>
+                            {scene.title}: {scene.startSeconds}s → {scene.endSeconds}s
+                          </small>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
             </section>
 
             <section className="glass-card">

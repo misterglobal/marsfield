@@ -4,6 +4,7 @@ const express_1 = require("express");
 const client_1 = require("@prisma/client");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const youtube_planner_service_1 = require("../services/youtube-planner.service");
+const youtube_narration_service_1 = require("../services/youtube-narration.service");
 const router = (0, express_1.Router)();
 const prisma = new client_1.PrismaClient();
 // GET /api/v1/youtube/productions
@@ -138,6 +139,50 @@ router.post('/productions/:id/create-project', auth_middleware_1.authMiddleware,
     catch (error) {
         console.error('Create project from YouTube production error:', error);
         res.status(500).json({ error: 'Failed creating project from YouTube production' });
+    }
+});
+// POST /api/v1/youtube/productions/:id/narration-package
+router.post('/productions/:id/narration-package', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('projects:write'), async (req, res) => {
+    try {
+        if (!req.user)
+            return void res.status(401).json({ error: 'Unauthorized' });
+        const production = await prisma.youtubeProduction.findFirst({
+            where: { id: req.params.id, userId: req.user.id },
+        });
+        if (!production)
+            return void res.status(404).json({ error: 'Production not found' });
+        const narrationPackage = (0, youtube_narration_service_1.createYoutubeNarrationPackage)({
+            script: production.script,
+            storyboard: production.storyboard,
+            targetDurationMin: production.targetDurationMin,
+            wordsPerMinute: Number(req.body.words_per_minute || 150),
+        });
+        const updated = await prisma.youtubeProduction.update({
+            where: { id: production.id },
+            data: {
+                narration: narrationPackage.narration,
+                captions: narrationPackage.captions,
+                audio: narrationPackage.audio,
+                status: production.status === 'planned' ? 'narration_prepared' : production.status,
+            },
+        });
+        await prisma.usageEvent.create({
+            data: {
+                userId: req.user.id,
+                eventType: 'youtube_narration_package',
+                credits: 0,
+                metadata: {
+                    production_id: production.id,
+                    estimated_duration_seconds: narrationPackage.narration.estimatedDurationSeconds,
+                    caption_count: narrationPackage.captions.count,
+                },
+            },
+        });
+        res.status(201).json({ ...updated, credits_charged: 0 });
+    }
+    catch (error) {
+        console.error('Create YouTube narration package error:', error);
+        res.status(500).json({ error: error instanceof Error ? error.message : 'Failed preparing narration package' });
     }
 });
 exports.default = router;

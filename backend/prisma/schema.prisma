@@ -253,6 +253,9 @@ model YoutubeProduction {
   strategy            Json?
   script              Json?
   storyboard          Json?
+  narration           Json?
+  captions            Json?
+  audio               Json?
   seo                 Json?
   thumbnailConcepts   Json?    @map("thumbnail_concepts")
   estimatedCreditsMin Int      @default(200) @map("estimated_credits_min")

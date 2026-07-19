@@ -25,6 +25,7 @@ test('creates a YouTube dry-run plan and converts it to a storyboard project', a
     thumbnailConcepts: [{ title: 'The hidden story', prompt: 'Cinematic thumbnail.' }],
   };
   let createPayload: any;
+  let narrationPayload: any;
 
   await authenticate(page);
   await mockApi(page, {
@@ -36,6 +37,19 @@ test('creates a YouTube dry-run plan and converts it to a storyboard project', a
     'GET /api/v1/youtube/productions/yt-prod-1': production,
     'POST /api/v1/youtube/productions/yt-prod-1/create-project': async (route) => {
       await route.fulfill({ status: 201, json: { project_id: 'project-youtube', project: { id: 'project-youtube', name: 'YouTube: The Sogdians and the Silk Road' } } });
+    },
+    'POST /api/v1/youtube/productions/yt-prod-1/narration-package': async (route) => {
+      narrationPayload = route.request().postDataJSON();
+      await route.fulfill({
+        status: 201,
+        json: {
+          ...production,
+          narration: { status: 'prepared', totalWords: 1200, estimatedDurationSeconds: 480, ttsText: 'There is a hidden story.' },
+          captions: { status: 'draft', count: 1, srt: '1\n00:00:00,000 --> 00:00:02,000\nThere is a hidden story.' },
+          audio: { status: 'not_generated', sceneTiming: [{ index: 0, title: 'Scene 1', startSeconds: 0, endSeconds: 24 }] },
+          credits_charged: 0,
+        },
+      });
     },
   });
 
@@ -49,6 +63,13 @@ test('creates a YouTube dry-run plan and converts it to a storyboard project', a
   await expect(page.getByText('The Hidden Story of the Sogdians')).toBeVisible();
   await expect(page.getByText('Ancient traders cross the desert.')).toBeVisible();
   expect(createPayload).toMatchObject({ topic: 'The Sogdians and the Silk Road', target_duration_min: 8, angle_count: 8 });
+
+  await page.getByLabel('Narration words per minute').fill('150');
+  await page.getByRole('button', { name: 'Prepare narration package' }).click();
+  await expect(page.getByText('1200 words')).toBeVisible();
+  await expect(page.getByText('1 caption cues')).toBeVisible();
+  await expect(page.getByLabel('TTS narration text')).toHaveValue('There is a hidden story.');
+  expect(narrationPayload).toMatchObject({ words_per_minute: 150 });
 
   await page.getByRole('button', { name: 'Create storyboard project' }).click();
   await expect(page.getByRole('link', { name: 'Open Projects' })).toBeVisible();

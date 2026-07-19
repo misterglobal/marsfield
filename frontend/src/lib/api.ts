@@ -138,6 +138,10 @@ export const api = {
   createProjectFromYoutubeProduction: (id: string) => request(`/youtube/productions/${id}/create-project`, {
     method: 'POST',
   }),
+  createYoutubeNarrationPackage: (id: string, payload: any) => request(`/youtube/productions/${id}/narration-package`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
 
   // Reusable character and brand kits
   getKits: () => request('/kits'),
