@@ -10,6 +10,7 @@ import projectRouter from './routes/project.routes';
 import accountRouter from './routes/account.routes';
 import uploadRouter from './routes/upload.routes';
 import kitRouter from './routes/kit.routes';
+import youtubeRouter from './routes/youtube.routes';
 import { queueService } from './services/queue.service';
 import { startRetentionScheduler } from './services/retention.service';
 
@@ -36,6 +37,7 @@ app.use('/api/v1/assets', assetRouter);
 app.use('/api/v1/projects', projectRouter);
 app.use('/api/v1/uploads', uploadRouter);
 app.use('/api/v1/kits', kitRouter);
+app.use('/api/v1/youtube', youtubeRouter);
 app.use('/api/v1', generateRouter);
 app.use('/api/v1/webhooks', webhookRouter);
 

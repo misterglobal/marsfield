@@ -824,6 +824,10 @@ body::after {
     max-width: 100%;
   }
 
+  .youtube-planner-layout {
+    grid-template-columns: 1fr !important;
+  }
+
   p,
   code,
   a {

@@ -105,6 +105,7 @@ export default function RootLayout({
   };
 
   const menuItems = [
+    { name: "YouTube Planner", href: "/youtube", icon: "YT" },
     { name: "Video Studio", href: "/", icon: "🎬" },
     { name: "Projects", href: "/projects", icon: "🗂️" },
     { name: "Asset Library", href: "/library", icon: "📁" },

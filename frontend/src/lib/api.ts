@@ -128,6 +128,17 @@ export const api = {
     body: JSON.stringify(payload),
   }),
 
+  // YouTube dry-run production planner
+  getYoutubeProductions: () => request('/youtube/productions'),
+  getYoutubeProduction: (id: string) => request(`/youtube/productions/${id}`),
+  createYoutubeProduction: (payload: any) => request('/youtube/productions', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  createProjectFromYoutubeProduction: (id: string) => request(`/youtube/productions/${id}/create-project`, {
+    method: 'POST',
+  }),
+
   // Reusable character and brand kits
   getKits: () => request('/kits'),
   createKit: (payload: any) => request('/kits', { method: 'POST', body: JSON.stringify(payload) }),

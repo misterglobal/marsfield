@@ -25,6 +25,7 @@ model User {
   usageEvents          UsageEvent[]
   storageObjects       StorageObject[]
   brandKits            BrandKit[]
+  youtubeProductions   YoutubeProduction[]
   freemiusEntitlements FreemiusEntitlement[]
   billingEvents        BillingEvent[]
 
@@ -237,6 +238,30 @@ model ProjectKitAssignment {
   @@id([projectId, brandKitId])
   @@index([brandKitId])
   @@map("project_kit_assignments")
+}
+
+model YoutubeProduction {
+  id                  String   @id @default(uuid())
+  userId              String   @map("user_id")
+  user                User     @relation(fields: [userId], references: [id])
+  projectId           String?  @map("project_id")
+  topic               String
+  audience            String?
+  targetDurationMin   Int      @default(8) @map("target_duration_min")
+  status              String   @default("draft")
+  research            Json?
+  strategy            Json?
+  script              Json?
+  storyboard          Json?
+  seo                 Json?
+  thumbnailConcepts   Json?    @map("thumbnail_concepts")
+  estimatedCreditsMin Int      @default(200) @map("estimated_credits_min")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@index([userId, createdAt])
+  @@index([projectId])
+  @@map("youtube_productions")
 }
 
 model ApiKey {
