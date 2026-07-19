@@ -73,7 +73,7 @@ router.get('/:id', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requi
                                 prompt: true,
                                 createdAt: true,
                                 assets: {
-                                    where: { type: 'video' },
+                                    where: { type: { in: ['image', 'video'] } },
                                     take: 1,
                                     select: {
                                         id: true,

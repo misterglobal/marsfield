@@ -194,6 +194,8 @@ export default function StudioPage() {
     const query = new URLSearchParams(window.location.search);
     const projectId = query.get('project_id');
     const sceneId = query.get('scene_id');
+    const requestedWorkflow = query.get('workflow');
+    const requestedModel = query.get('model');
     if (!projectId || !sceneId) return;
 
     void api.getProject(projectId).then((project) => {
@@ -216,7 +218,13 @@ export default function StudioPage() {
       setSelectedSceneId(sceneId);
       setPrompt([scene.prompt || '', kitGuidance.length ? `Project continuity rules:\n${kitGuidance.join('\n')}` : ''].filter(Boolean).join('\n\n'));
       if (scene.durationSeconds) setDuration(scene.durationSeconds);
-      if (kitReferences.length) {
+      if (requestedWorkflow === 'text-to-image') {
+        setWorkflow('text-to-image');
+        setModel(requestedModel || 'google/nano-banana-2');
+      } else if (requestedWorkflow) {
+        setWorkflow(requestedWorkflow);
+        if (requestedModel) setModel(requestedModel);
+      } else if (kitReferences.length) {
         setReferenceImages(kitReferences);
         setWorkflow('multimodal-video');
         setModel('bytedance/seedance-2.0');

@@ -82,7 +82,7 @@ router.get('/:id', authMiddleware, requireScope('projects:read'), async (req: Au
                 prompt: true,
                 createdAt: true,
                 assets: {
-                  where: { type: 'video' },
+                  where: { type: { in: ['image', 'video'] } },
                   take: 1,
                   select: {
                     id: true,
