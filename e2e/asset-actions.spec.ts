@@ -36,3 +36,32 @@ test('shows media-appropriate actions only', async ({ page }) => {
   await expect(page.getByRole('link', { name: 'Use for lip sync' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Upscale' })).toHaveCount(0);
 });
+
+test('offers send-to actions after a generated video finishes', async ({ page }) => {
+  await authenticate(page);
+  await mockApi(page, {
+    'GET /api/v1/assets': [],
+    'POST /api/v1/generate': {
+      id: 'prediction-video',
+      status: 'processing',
+      output_url: null,
+      predictions: [{ id: 'prediction-video', status: 'processing', output_url: null, variation_index: 0 }],
+      credits_charged: 1,
+    },
+    'GET /api/v1/predictions/prediction-video': {
+      id: 'prediction-video',
+      status: 'succeeded',
+      output_url: 'https://media.test/generated.mp4',
+      asset_id: 'generated-asset',
+      asset_type: 'video',
+    },
+  });
+
+  await page.goto('/');
+  await page.locator('textarea').fill('A cinematic generated video.');
+  await page.getByRole('button', { name: 'Generate Output' }).click();
+
+  await expect(page.getByRole('link', { name: 'Add captions' })).toHaveAttribute('href', /workflow=video-caption.*asset_id=generated-asset/);
+  await expect(page.getByRole('link', { name: 'Resize' })).toHaveAttribute('href', /workflow=social-resize.*asset_id=generated-asset/);
+  await expect(page.getByRole('link', { name: 'Enhance' })).toHaveAttribute('href', /workflow=video-enhance.*asset_id=generated-asset/);
+});

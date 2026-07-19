@@ -42,7 +42,7 @@ test('exports a reordered trimmed project timeline from owned video assets', asy
     });
   });
   await page.route('**/api/v1/predictions/timeline-prediction', (route) => route.fulfill({
-    json: { id: 'timeline-prediction', status: 'succeeded', output_url: 'https://media.test/final.mp4' },
+    json: { id: 'timeline-prediction', status: 'succeeded', output_url: 'https://media.test/final.mp4', asset_id: 'timeline-asset', asset_type: 'video' },
   }));
 
   await page.goto('/projects');
@@ -54,6 +54,7 @@ test('exports a reordered trimmed project timeline from owned video assets', asy
   await page.getByRole('button', { name: 'Export final video' }).click();
 
   await expect(page.getByText(/Timeline export ready/)).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Add captions' })).toHaveAttribute('href', /workflow=video-caption.*asset_id=timeline-asset/);
   expect(exportPayload).toMatchObject({
     title: 'Final timeline export',
     clips: [
@@ -135,7 +136,7 @@ test('adds generated storyboard results to the timeline in scene order', async (
     });
   });
   await page.route('**/api/v1/predictions/timeline-prediction', (route) => route.fulfill({
-    json: { id: 'timeline-prediction', status: 'succeeded', output_url: 'https://media.test/final-storyboard.mp4' },
+    json: { id: 'timeline-prediction', status: 'succeeded', output_url: 'https://media.test/final-storyboard.mp4', asset_id: 'timeline-asset', asset_type: 'video' },
   }));
 
   await page.goto('/projects');

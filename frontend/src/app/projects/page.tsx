@@ -82,6 +82,7 @@ export default function ProjectsPage() {
   const [timelineTitle, setTimelineTitle] = useState('Final timeline export');
   const [timelineExporting, setTimelineExporting] = useState(false);
   const [timelineResultUrl, setTimelineResultUrl] = useState('');
+  const [timelineResultAssetId, setTimelineResultAssetId] = useState('');
   const [planning, setPlanning] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -144,11 +145,13 @@ export default function ProjectsPage() {
     if (!token || !selectedProject) {
       setTimelineAssets([]);
       setTimelineClips([]);
+      setTimelineResultAssetId('');
       return;
     }
     void loadTimelineAssets(selectedProject.id);
     setTimelineClips([]);
     setTimelineResultUrl('');
+    setTimelineResultAssetId('');
   }, [token, selectedProject?.id, loadTimelineAssets]);
 
   const addTimelineClip = (asset: TimelineAsset) => {
@@ -206,6 +209,7 @@ export default function ProjectsPage() {
     if (!selectedProject || timelineClips.length === 0) return;
     setTimelineExporting(true);
     setTimelineResultUrl('');
+    setTimelineResultAssetId('');
     setError('');
     try {
       const payload = {
@@ -218,11 +222,13 @@ export default function ProjectsPage() {
       };
       const result = await api.exportTimeline(selectedProject.id, payload);
       let outputUrl = result.output_url || '';
+      let outputAssetId = result.asset_id || '';
       if (!outputUrl && result.id) {
         for (let attempt = 0; attempt < 120; attempt++) {
           const status = await api.getPrediction(result.id);
           if (status.status === 'succeeded' && status.output_url) {
             outputUrl = status.output_url;
+            outputAssetId = status.asset_id || '';
             break;
           }
           if (status.status === 'failed') throw new Error(status.error || 'Timeline export failed');
@@ -231,6 +237,7 @@ export default function ProjectsPage() {
       }
       if (!outputUrl) throw new Error('Timeline export is taking longer than expected. Check the Asset Library shortly.');
       setTimelineResultUrl(outputUrl);
+      setTimelineResultAssetId(outputAssetId);
       setSelectedProject(await api.getProject(selectedProject.id));
       await loadTimelineAssets(selectedProject.id);
       await loadProjects();
@@ -423,9 +430,18 @@ export default function ProjectsPage() {
                 </button>
               </div>
               {timelineResultUrl && (
-                <a href={timelineResultUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)', fontSize: '0.85rem' }}>
-                  Timeline export ready — open video
-                </a>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <a href={timelineResultUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)', fontSize: '0.85rem' }}>
+                    Timeline export ready — open video
+                  </a>
+                  {timelineResultAssetId && (
+                    <>
+                      <a href={`/?workflow=video-caption&asset_id=${encodeURIComponent(timelineResultAssetId)}`} className="btn btn-secondary" style={{ padding: '0.4rem 0.6rem', fontSize: '0.72rem', textDecoration: 'none' }}>Add captions</a>
+                      <a href={`/?workflow=social-resize&asset_id=${encodeURIComponent(timelineResultAssetId)}`} className="btn btn-secondary" style={{ padding: '0.4rem 0.6rem', fontSize: '0.72rem', textDecoration: 'none' }}>Resize</a>
+                      <a href={`/?workflow=video-enhance&asset_id=${encodeURIComponent(timelineResultAssetId)}`} className="btn btn-secondary" style={{ padding: '0.4rem 0.6rem', fontSize: '0.72rem', textDecoration: 'none' }}>Enhance</a>
+                    </>
+                  )}
+                </div>
               )}
             </div>
 

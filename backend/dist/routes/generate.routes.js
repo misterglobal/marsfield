@@ -820,6 +820,13 @@ router.get('/predictions/:id', auth_middleware_1.authMiddleware, (0, auth_middle
         const { id } = req.params;
         const prediction = await prisma.prediction.findUnique({
             where: { id },
+            include: {
+                assets: {
+                    orderBy: { createdAt: 'desc' },
+                    take: 1,
+                    select: { id: true, type: true },
+                },
+            },
         });
         if (!prediction || (prediction.userId !== user.id)) {
             res.status(404).json({ error: 'Prediction not found' });
@@ -829,6 +836,8 @@ router.get('/predictions/:id', auth_middleware_1.authMiddleware, (0, auth_middle
             id: prediction.id,
             status: prediction.status,
             output_url: prediction.outputUrl,
+            asset_id: prediction.assets[0]?.id,
+            asset_type: prediction.assets[0]?.type,
             error: prediction.errorMessage,
             completed_at: prediction.completedAt,
         });
