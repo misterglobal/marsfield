@@ -149,6 +149,12 @@ export const api = {
   updateKit: (id: string, payload: any) => request(`/kits/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteKit: (id: string) => request(`/kits/${id}`, { method: 'DELETE' }),
 
+  // Feedback
+  submitFeedback: (payload: any) => request('/feedback', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+
   // Account
   getUsage: () => request('/account/usage'),
   getPlans: () => request('/account/plans'),

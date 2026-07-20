@@ -27,6 +27,7 @@
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.2.0",
     "replicate": "^0.30.1",
+    "resend": "^6.17.2",
     "sharp": "^0.35.2"
   },
   "devDependencies": {

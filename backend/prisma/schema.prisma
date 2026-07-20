@@ -26,6 +26,7 @@ model User {
   storageObjects       StorageObject[]
   brandKits            BrandKit[]
   youtubeProductions   YoutubeProduction[]
+  feedbackReports      FeedbackReport[]
   freemiusEntitlements FreemiusEntitlement[]
   billingEvents        BillingEvent[]
 
@@ -190,6 +191,26 @@ model BillingEvent {
   @@index([userId, createdAt])
   @@index([eventType, createdAt])
   @@map("billing_events")
+}
+
+model FeedbackReport {
+  id             String    @id @default(uuid())
+  userId         String    @map("user_id")
+  user           User      @relation(fields: [userId], references: [id])
+  type           String
+  message        String
+  pageUrl        String?   @map("page_url")
+  userAgent      String?   @map("user_agent")
+  context        Json?
+  emailStatus    String    @default("pending") @map("email_status")
+  emailMessageId String?   @map("email_message_id")
+  emailError     String?   @map("email_error")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  sentAt         DateTime? @map("sent_at")
+
+  @@index([userId, createdAt])
+  @@index([emailStatus, createdAt])
+  @@map("feedback_reports")
 }
 
 model BrandKit {

@@ -434,6 +434,23 @@ body::after {
   cursor: pointer;
 }
 
+.feedback-floating-button {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 900;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(20, 20, 30, 0.82);
+  color: var(--foreground);
+  border-radius: 999px;
+  padding: 0.7rem 1rem;
+  cursor: pointer;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  font-weight: 600;
+}
+
 .studio-layout,
 .projects-layout,
 .settings-layout {
@@ -591,6 +608,10 @@ body::after {
     min-height: 32px;
     padding: 0.3rem 0.55rem;
     font-size: 0.72rem;
+  }
+
+  .feedback-floating-button {
+    display: none;
   }
 
   .workspace-content {

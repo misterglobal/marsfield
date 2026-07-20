@@ -6,7 +6,7 @@ export default function PrivacyPage() {
     <article className={styles.page}>
       <header className={styles.hero}>
         <h1>Privacy Policy</h1>
-        <p>Effective July 2, 2026 · Last updated July 2, 2026</p>
+        <p>Effective July 2, 2026 · Last updated July 20, 2026</p>
         <p>This policy explains how Marsfield collects, uses, shares, and protects personal information when you use marsfield.xyz, our applications, and our APIs (the “Service”).</p>
       </header>
 
@@ -25,6 +25,8 @@ export default function PrivacyPage() {
         <p>Freemius handles checkout and payment processing as merchant of record. We receive subscription, plan, license, transaction-status, and customer-identification data needed to activate and administer your plan. We do not receive or store full payment-card numbers.</p>
         <h3>Usage and technical data</h3>
         <p>We collect credit usage, storage use, prediction status, API-key usage timestamps, logs, error details, IP address, browser/device information, and security events. Authentication information may be stored in your browser’s local storage to keep you signed in.</p>
+        <h3>Feedback and support data</h3>
+        <p>If you submit feedback or report a problem, we collect your message, issue type, account identifier, current page URL, browser/device details, and related troubleshooting context so we can diagnose and respond to the issue.</p>
       </section>
 
       <section className={styles.section}>
@@ -48,6 +50,7 @@ export default function PrivacyPage() {
           <li><a href="https://replicate.com/privacy" target="_blank" rel="noreferrer">Replicate</a> and model providers process prompts, reference media, generation parameters, and outputs.</li>
           <li><a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noreferrer">Cloudflare</a> provides R2 object storage and network services.</li>
           <li><a href="https://freemius.com/privacy/" target="_blank" rel="noreferrer">Freemius</a> provides checkout, subscription, tax, fraud-prevention, and merchant-of-record services.</li>
+          <li><a href="https://resend.com/legal/privacy-policy" target="_blank" rel="noreferrer">Resend</a> provides transactional email delivery for feedback and support messages.</li>
           <li>Hosting, database, email, monitoring, security, and professional-service providers may process operational information on our behalf.</li>
         </ul>
         <p>We may also disclose information during a business transaction, with your direction or consent, or when reasonably necessary to comply with law or protect rights and safety. We do not sell personal information for money.</p>
