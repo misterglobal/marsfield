@@ -27,6 +27,77 @@ const SHOT_RECIPES = [
     { type: 'Counterfactual beat', camera: 'Locked symmetrical frame with one changing element', transition: 'Smash cut to consequence', purpose: 'reversal' },
     { type: 'Present-day echo', camera: 'Gimbal reveal from detail to recognisable location', transition: 'Visual rhyme', purpose: 'relevance' },
 ];
+const VISUAL_THREADS = [
+    {
+        id: 'human',
+        name: 'Human consequence',
+        purpose: 'Keep the stakes legible at an individual scale without requiring the same person in every shot.',
+        anchors: ['human-scale behavior', 'material detail', 'restrained eye-level framing'],
+        characterPolicy: 'Use an established person only when the narration concerns their experience; otherwise use hands, traces, or environment.',
+    },
+    {
+        id: 'evidence',
+        name: 'Evidence trail',
+        purpose: 'Make claims feel connected through recurring sources, artifacts, records, and observable details.',
+        anchors: ['one evidence object', 'controlled macro detail', 'brass highlight against a restrained palette'],
+        characterPolicy: 'No character required unless their interaction proves the claim.',
+    },
+    {
+        id: 'system',
+        name: 'System and geography',
+        purpose: 'Widen from individual events to routes, institutions, processes, and power.',
+        anchors: ['directional line motif', 'top-down or architectural orientation', 'indigo structural accents'],
+        characterPolicy: 'Prefer spatial relationships and process; introduce people only for scale or causality.',
+    },
+    {
+        id: 'echo',
+        name: 'Present-day echo',
+        purpose: 'Connect the historical or abstract argument to a visible consequence or modern parallel.',
+        anchors: ['before-and-after visual rhyme', 'recognisable environment', 'returning shape or texture'],
+        characterPolicy: 'A recurring person may return for payoff, but a location or object can carry the callback instead.',
+    },
+];
+function visualThreadFor(purpose, index) {
+    if (purpose === 'empathy' || purpose === 'tension')
+        return 'human';
+    if (purpose === 'proof' || purpose === 'contrast' || purpose === 'clarity')
+        return 'evidence';
+    if (purpose === 'context' || purpose === 'explanation' || purpose === 'scale')
+        return 'system';
+    if (purpose === 'relevance')
+        return 'echo';
+    return VISUAL_THREADS[index % VISUAL_THREADS.length].id;
+}
+function validateStoryboardContinuity(storyboard) {
+    const issues = [];
+    const planted = new Map();
+    const paidOff = new Set();
+    storyboard.forEach((scene, index) => {
+        const previous = storyboard[index - 1];
+        if (index > 0 && !scene.previousShotSummary) {
+            issues.push({ severity: 'error', sceneNumber: scene.sceneNumber, code: 'MISSING_HANDOFF', message: 'Scene has no explicit incoming connection.' });
+        }
+        if (!scene.continuityContract?.preserve?.length || !scene.continuityContract?.change?.length) {
+            issues.push({ severity: 'error', sceneNumber: scene.sceneNumber, code: 'EMPTY_CONTINUITY_CONTRACT', message: 'Scene must say what remains stable and what changes.' });
+        }
+        if (previous?.storyFunction === scene.storyFunction && previous?.visualThreadId === scene.visualThreadId) {
+            issues.push({ severity: 'warning', sceneNumber: scene.sceneNumber, code: 'REPEATED_VISUAL_FUNCTION', message: 'Adjacent scenes repeat the same visual thread and story function.' });
+        }
+        for (const motif of scene.plants || [])
+            planted.set(motif, scene.sceneNumber);
+        for (const motif of scene.callbacks || [])
+            paidOff.add(motif);
+    });
+    for (const [motif, sceneNumber] of planted) {
+        if (!paidOff.has(motif)) {
+            issues.push({ severity: 'warning', sceneNumber, code: 'UNPAID_SETUP', message: `The planted motif "${motif}" has no later callback.` });
+        }
+    }
+    return {
+        status: issues.some((issue) => issue.severity === 'error') ? 'needs_revision' : issues.length ? 'review' : 'passed',
+        issues,
+    };
+}
 function clampInt(value, fallback, min, max) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? Math.max(min, Math.min(max, Math.round(parsed))) : fallback;
@@ -108,38 +179,147 @@ function planYoutubeProduction(input) {
                 : 'Cut any sentence that repeats the visual; use narration for meaning and visuals for evidence.',
         };
     });
+    const productionBible = {
+        version: 2,
+        thematicSpine: `Follow how the strongest visible evidence changes the viewer's understanding of ${topic}.`,
+        visualStyle: {
+            format,
+            tone,
+            palette: ['restrained indigo', 'weathered neutral', 'selective brass highlight'],
+            lightingRules: ['Use motivated, physically plausible light', 'Keep light direction stable inside continuous action', 'Change lighting only with an explicit time or location transition'],
+            lensLanguage: 'Human material uses eye-level perspective; systems use wider or top-down orientation; evidence uses controlled detail.',
+        },
+        characterPolicy: 'Characters are continuity anchors only when their experience advances the story. Do not force a recurring person into evidence, map, process, or environmental shots.',
+        referencePolicy: {
+            global: 'Pass the approved style reference to every generation.',
+            character: 'Pass a character reference only when that established character appears.',
+            location: 'Pass the matching location reference when returning to an established place.',
+            previousFrame: 'Pass the prior frame only for continuous action or an intentional visual match; do not contaminate a new visual thread.',
+        },
+        visualThreads: VISUAL_THREADS,
+    };
+    const sequences = scriptSections.map((section, index) => ({
+        id: `sequence-${index + 1}`,
+        chapter: section.name,
+        objective: section.purpose,
+        questionIn: index === 0 ? `What familiar image of ${topic} is incomplete?` : `What must the viewer now understand after ${scriptSections[index - 1].name}?`,
+        discovery: section.narration,
+        emotionalChange: index === 0 ? 'familiarity to curiosity' : index >= scriptSections.length - 2 ? 'uncertainty to earned clarity' : 'curiosity to sharper tension',
+        setup: `Orient the viewer to ${section.purpose} through one legible subject.`,
+        payoff: section.retentionDevice,
+        nextSequenceHandoff: index < scriptSections.length - 1
+            ? `End on a question, shape, action, or sound that motivates ${scriptSections[index + 1].name}.`
+            : 'Return to the opening visual with changed meaning.',
+    }));
     const sceneCount = clampInt(Math.round(totalSeconds / 24), 16, 10, 36);
     const baseDuration = Math.floor(totalSeconds / sceneCount);
     const remainder = totalSeconds % sceneCount;
     let sceneCursor = 0;
-    const storyboard = Array.from({ length: sceneCount }, (_, index) => {
+    const sceneSlots = Array.from({ length: sceneCount }, (_, index) => {
         const durationSeconds = baseDuration + (index < remainder ? 1 : 0);
         const midpoint = sceneCursor + durationSeconds / 2;
-        const section = scriptSections.reduce((match, candidate) => midpoint >= candidate.startSeconds ? candidate : match, scriptSections[0]);
+        const sectionIndex = scriptSections.reduce((match, candidate, candidateIndex) => midpoint >= candidate.startSeconds ? candidateIndex : match, 0);
+        const slot = { index, durationSeconds, startSeconds: sceneCursor, sectionIndex };
+        sceneCursor += durationSeconds;
+        return slot;
+    });
+    const sectionSceneCounts = sceneSlots.reduce((counts, slot) => counts.set(slot.sectionIndex, (counts.get(slot.sectionIndex) || 0) + 1), new Map());
+    const sectionSceneOrdinals = new Map();
+    const storyboardDraft = sceneSlots.map((slot) => {
+        const { index, durationSeconds, startSeconds, sectionIndex } = slot;
+        const section = scriptSections[sectionIndex];
+        const sequence = sequences[sectionIndex];
+        const ordinal = (sectionSceneOrdinals.get(sectionIndex) || 0) + 1;
+        sectionSceneOrdinals.set(sectionIndex, ordinal);
+        const shotsInSequence = sectionSceneCounts.get(sectionIndex) || 1;
+        const phase = ordinal === 1 ? 'setup' : ordinal === shotsInSequence ? 'payoff' : ordinal <= Math.ceil(shotsInSequence / 2) ? 'development' : 'turn';
         const recipe = SHOT_RECIPES[(index * 3 + Math.floor(index / 4)) % SHOT_RECIPES.length];
-        const visualSubject = index % 4 === 0 ? 'one source or artifact' : index % 4 === 1 ? 'a human action' : index % 4 === 2 ? 'a spatial or process detail' : 'a consequence visible in the environment';
-        const scene = {
+        const visualThreadId = visualThreadFor(recipe.purpose, index);
+        const visualThread = VISUAL_THREADS.find((thread) => thread.id === visualThreadId);
+        const visualSubject = visualThreadId === 'human'
+            ? 'a sourced human action, personal trace, or lived consequence'
+            : visualThreadId === 'evidence'
+                ? 'one source, artifact, record, or observable detail'
+                : visualThreadId === 'system'
+                    ? 'a spatial relationship, route, process, or institutional mechanism'
+                    : 'a present-day consequence or visual rhyme';
+        const motif = sectionIndex % 3 === 0 ? 'directional-line' : sectionIndex % 3 === 1 ? 'evidence-shape' : 'material-texture';
+        const connectiveType = sectionIndex !== (sceneSlots[index - 1]?.sectionIndex ?? sectionIndex)
+            ? 'chapter-bridge'
+            : index % 3 === 0 ? 'sound-bridge' : index % 3 === 1 ? 'visual-rhyme' : 'motivated-cut';
+        const narrativeChange = phase === 'setup'
+            ? `Establish what the viewer needs to notice about ${section.purpose}.`
+            : phase === 'development'
+                ? `Add concrete evidence that complicates the initial reading of ${section.purpose}.`
+                : phase === 'turn'
+                    ? `Reframe the evidence so the stakes of ${section.purpose} become sharper.`
+                    : `Pay off this sequence and create a motivated handoff to ${scriptSections[sectionIndex + 1]?.name || 'the closing callback'}.`;
+        return {
             index,
             sceneNumber: index + 1,
+            sequenceId: sequence.id,
+            sequencePhase: phase,
             title: `${recipe.type}: ${section.name}`,
-            timecode: `${timecode(sceneCursor)}–${timecode(sceneCursor + durationSeconds)}`,
+            timecode: `${timecode(startSeconds)}–${timecode(startSeconds + durationSeconds)}`,
             durationSeconds,
             chapter: section.name,
             storyFunction: recipe.purpose,
+            visualThreadId,
+            visualThread: visualThread.name,
             narrationBeat: section.narration,
-            sceneDescription: `Show ${visualSubject} that advances “${section.purpose}”. The frame must add evidence, emotion, or orientation—not merely illustrate the topic.`,
+            narrativeChange,
+            sceneDescription: `${narrativeChange} Show ${visualSubject}; the image must advance the argument rather than merely illustrate ${topic}.`,
             shotType: recipe.type,
             cameraDirection: recipe.camera,
-            transition: recipe.transition,
+            transition: `${recipe.transition}; ${connectiveType} must use a visible or audible element named in both adjacent shots.`,
             audioDirection: index % 5 === 0 ? 'Let production sound lead for one beat before narration.' : index % 3 === 0 ? 'Use a restrained sound bridge into the next scene.' : 'Keep music under dialogue; reserve the accent for the evidence reveal.',
-            keyVisualElements: [visualSubject, recipe.purpose, section.purpose],
-            imagePrompt: `${format}, ${tone.toLowerCase()}. ${recipe.type} for a film about ${topic}; ${visualSubject}; ${section.purpose}; coherent colour pipeline, physically plausible light, period and geographic accuracy, 16:9, no text, no logos.`,
-            continuity: 'Maintain established palette, geography, wardrobe logic, light direction, and screen direction. Introduce only one new visual idea.',
+            keyVisualElements: [visualSubject, recipe.purpose, section.purpose, motif],
+            continuityContract: {
+                preserve: [productionBible.thematicSpine, ...productionBible.visualStyle.palette, visualThread.anchors[0]],
+                optional: ['Recurring character presence', 'Prior location', 'Prior screen direction when action is not continuous'],
+                change: [narrativeChange, `Shift emphasis toward the ${visualThread.name.toLowerCase()} thread.`],
+                connectiveDevice: { type: connectiveType, motif },
+            },
+            referenceRequirements: {
+                styleReference: true,
+                previousFrame: connectiveType === 'visual-rhyme' || connectiveType === 'motivated-cut',
+                characterReference: visualThreadId === 'human' ? 'only-if-an-established-person-returns' : false,
+                locationReference: 'only-if-returning-to-an-established-location',
+            },
+            callbacks: phase === 'payoff' || sectionIndex === scriptSections.length - 1 ? [motif] : [],
+            plants: phase === 'setup' && sectionIndex < scriptSections.length - 1 ? [motif] : [],
             status: 'needs_reference',
         };
-        sceneCursor += durationSeconds;
-        return scene;
     });
+    const storyboard = storyboardDraft.map((scene, index) => {
+        const previous = storyboardDraft[index - 1];
+        const next = storyboardDraft[index + 1];
+        const previousShotSummary = previous
+            ? `Shot ${previous.sceneNumber} ended the ${previous.visualThread} beat using ${previous.continuityContract.connectiveDevice.motif}.`
+            : 'Opening image establishes the film’s first visual question.';
+        const nextShotSetup = next
+            ? `End with ${scene.continuityContract.connectiveDevice.motif} or its sound equivalent so shot ${next.sceneNumber} can enter the ${next.visualThread} thread.`
+            : 'Resolve the opening visual with changed meaning.';
+        const continuityIn = previous
+            ? `Carry forward the argument and ${previous.continuityContract.connectiveDevice.motif}; preserve a character or location only if this shot remains in that visual thread.`
+            : `Establish the ${scene.visualThread} thread and the production palette.`;
+        const continuityOut = nextShotSetup;
+        const imagePrompt = `${format}, ${tone.toLowerCase()}. Film about ${topic}. ${scene.shotType}. ${scene.sceneDescription} `
+            + `THEMATIC LOCK: ${productionBible.thematicSpine} VISUAL LOCK: ${productionBible.visualStyle.palette.join(', ')}; physically plausible light. `
+            + `CONTINUITY IN: ${continuityIn} STORY CHANGE: ${scene.narrativeChange} CONTINUITY OUT: ${continuityOut} `
+            + `REFERENCE POLICY: ${scene.referenceRequirements.characterReference ? 'Use the locked character reference only if that established person appears; otherwise omit people.' : 'No character continuity required.'} `
+            + '16:9, no text, no logos.';
+        return {
+            ...scene,
+            previousShotSummary,
+            nextShotSetup,
+            continuityIn,
+            continuityOut,
+            imagePrompt,
+            continuity: `${continuityIn} ${continuityOut}`,
+        };
+    });
+    const continuityReport = validateStoryboardContinuity(storyboard);
     const words = keywordsFor(topic);
     const strategy = {
         targetAudience: audience,
@@ -148,6 +328,9 @@ function planYoutubeProduction(input) {
         objective,
         contentType: targetDurationMin >= 8 ? 'chaptered long-form video' : 'focused short-form explainer',
         positioning: `${format} about ${topic}, shaped for ${audience}. ${objective}.`,
+        productionBible,
+        sequences,
+        continuityReport,
         centralQuestion: `What do we misunderstand about ${topic}, and what changes when we follow the strongest evidence?`,
         viewerPromise: `By the end, the viewer can explain the central tension in ${topic}, point to the evidence, and understand why it matters.`,
         keywords: Array.from(new Set([...words, 'explained', 'documentary', 'analysis'])).slice(0, 12),

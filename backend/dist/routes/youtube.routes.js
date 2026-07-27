@@ -127,7 +127,12 @@ router.post('/productions/:id/create-project', auth_middleware_1.authMiddleware,
                     index,
                     title: typeof scene.title === 'string' ? scene.title : `Scene ${index + 1}`,
                     prompt: typeof scene.imagePrompt === 'string' ? scene.imagePrompt : typeof scene.sceneDescription === 'string' ? scene.sceneDescription : null,
-                    notes: typeof scene.sceneDescription === 'string' ? scene.sceneDescription : null,
+                    notes: [
+                        typeof scene.sceneDescription === 'string' ? scene.sceneDescription : '',
+                        typeof scene.previousShotSummary === 'string' ? `Continuity in: ${scene.previousShotSummary}` : '',
+                        typeof scene.nextShotSetup === 'string' ? `Continuity out: ${scene.nextShotSetup}` : '',
+                        typeof scene.visualThread === 'string' ? `Visual thread: ${scene.visualThread}` : '',
+                    ].filter(Boolean).join('\n'),
                     durationSeconds: Number.isInteger(scene.durationSeconds) ? scene.durationSeconds : null,
                 })),
             });

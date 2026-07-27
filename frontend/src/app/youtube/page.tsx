@@ -211,15 +211,24 @@ function ScriptPanel({ production }: { production: Production }) {
 }
 
 function StoryboardPanel({ production }: { production: Production }) {
+  const continuityReport = production.strategy?.continuityReport;
   return <div className="youtube-panel-stack">
-    <section className="glass-card youtube-section-heading"><div><span className="youtube-eyebrow">Shot deck</span><h2>{production.storyboard?.length} purposeful shots</h2><p className="youtube-muted">Shot grammar changes with story function. Continuity and transitions are specified at every cut.</p></div><span className="youtube-warning">References needed</span></section>
+    <section className="glass-card youtube-section-heading"><div><span className="youtube-eyebrow">Shot deck</span><h2>{production.storyboard?.length} purposeful shots</h2><p className="youtube-muted">Characters appear only when they advance the story. Thematic, visual, causal, and audio threads connect the remaining shots.</p></div><span className="youtube-warning">{continuityReport?.issues?.length ? `${continuityReport.issues.length} continuity notes` : 'Continuity mapped'}</span></section>
     <section className="youtube-shot-grid">{production.storyboard?.map((scene: any) => <article className="glass-card youtube-shot-card" key={scene.index}>
       <div className="youtube-shot-top"><span>{String(scene.sceneNumber || scene.index + 1).padStart(2, '0')}</span><strong>{scene.timecode}</strong></div>
-      <div className="youtube-shot-frame"><span>{scene.shotType || 'Planned shot'}</span><small>{scene.storyFunction}</small></div>
+      <div className="youtube-shot-frame"><span>{scene.shotType || 'Planned shot'}</span><small>{scene.visualThread || scene.storyFunction}</small></div>
       <h3>{scene.chapter}</h3><p>{scene.sceneDescription}</p>
-      <dl><div><dt>Camera</dt><dd>{scene.cameraDirection}</dd></div><div><dt>Transition</dt><dd>{scene.transition}</dd></div><div><dt>Sound</dt><dd>{scene.audioDirection}</dd></div></dl>
-      <details><summary>Generation brief & continuity</summary><p>{scene.imagePrompt}</p><p className="youtube-muted">{scene.continuity}</p></details>
+      <dl><div><dt>Story change</dt><dd>{scene.narrativeChange}</dd></div><div><dt>Camera</dt><dd>{scene.cameraDirection}</dd></div><div><dt>Transition</dt><dd>{scene.transition}</dd></div><div><dt>Sound</dt><dd>{scene.audioDirection}</dd></div></dl>
+      <details><summary>Continuity contract</summary>
+        <p><strong>From previous:</strong> {scene.previousShotSummary}</p>
+        <p><strong>Preserve:</strong> {scene.continuityContract?.preserve?.join(' · ')}</p>
+        <p><strong>Intentionally change:</strong> {scene.continuityContract?.change?.join(' · ')}</p>
+        <p><strong>Set up next:</strong> {scene.nextShotSetup}</p>
+        <p className="youtube-muted">Character reference: {scene.referenceRequirements?.characterReference || 'not required'} · Previous frame: {scene.referenceRequirements?.previousFrame ? 'use for this transition' : 'do not require'}</p>
+      </details>
+      <details><summary>Generation brief</summary><p>{scene.imagePrompt}</p></details>
     </article>)}</section>
+    {continuityReport?.issues?.length ? <section className="glass-card"><span className="youtube-eyebrow">Continuity review</span><h3>{continuityReport.status?.replaceAll('_', ' ')}</h3><ul>{continuityReport.issues.map((issue: any, index: number) => <li key={`${issue.code}-${issue.sceneNumber}-${index}`}>Shot {issue.sceneNumber}: {issue.message}</li>)}</ul></section> : null}
   </div>;
 }
 
