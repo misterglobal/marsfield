@@ -1,4 +1,5 @@
-import { NextFunction, Response } from 'express';
+import { NextFunction, Request, Response } from 'express';
+import { createHash } from 'crypto';
 import Redis from 'ioredis';
 import { AuthenticatedRequest } from './auth.middleware';
 
@@ -86,6 +87,36 @@ export function rateLimit(bucket: RateLimitBucket) {
         error: `Too many ${bucket} requests. Try again in ${usage.ttl} seconds.`,
         retry_after_seconds: usage.ttl,
       });
+      return;
+    }
+    next();
+  };
+}
+
+export function publicRateLimit(
+  bucket: string,
+  limit: number,
+  identity?: (req: Request) => string | undefined,
+) {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const forwarded = req.headers['x-forwarded-for'];
+    const ip = (Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(',')[0])?.trim() || req.ip || 'unknown';
+    const suppliedIdentity = identity?.(req);
+    const digest = (value: string) => createHash('sha256').update(value).digest('hex');
+    const prefix = `marsfield:rate-limit:public:${bucket}`;
+    const keys = [`${prefix}:ip:${digest(ip)}`];
+    if (suppliedIdentity) keys.push(`${prefix}:identity:${digest(suppliedIdentity.toLowerCase())}`);
+    const usage = await consume(keys);
+    if (!usage) {
+      next();
+      return;
+    }
+    res.setHeader('RateLimit-Limit', String(limit));
+    res.setHeader('RateLimit-Remaining', String(Math.max(0, limit - usage.count)));
+    res.setHeader('RateLimit-Reset', String(usage.ttl));
+    if (usage.count > limit) {
+      res.setHeader('Retry-After', String(usage.ttl));
+      res.status(429).json({ error: 'Too many recovery attempts. Please try again later.', retry_after_seconds: usage.ttl });
       return;
     }
     next();

@@ -77,13 +77,15 @@ async function authMiddleware(req, res, next) {
                 plan: true,
                 creditsUsed: true,
                 creditsLimit: true,
+                authVersion: true,
             },
         });
-        if (!user) {
+        if (!user || user.authVersion !== (payload.authVersion ?? 0)) {
             res.status(401).json({ error: 'User associated with token not found' });
             return;
         }
-        req.user = user;
+        const { authVersion: _authVersion, ...authenticatedUser } = user;
+        req.user = authenticatedUser;
         req.authType = 'jwt';
         req.credentialId = user.id;
         next();

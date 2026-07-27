@@ -50,7 +50,7 @@ export default function PrivacyPage() {
           <li><a href="https://replicate.com/privacy" target="_blank" rel="noreferrer">Replicate</a> and model providers process prompts, reference media, generation parameters, and outputs.</li>
           <li><a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noreferrer">Cloudflare</a> provides R2 object storage and network services.</li>
           <li><a href="https://freemius.com/privacy/" target="_blank" rel="noreferrer">Freemius</a> provides checkout, subscription, tax, fraud-prevention, and merchant-of-record services.</li>
-          <li><a href="https://resend.com/legal/privacy-policy" target="_blank" rel="noreferrer">Resend</a> provides transactional email delivery for feedback and support messages.</li>
+          <li><a href="https://resend.com/legal/privacy-policy" target="_blank" rel="noreferrer">Resend</a> provides transactional email delivery for account recovery, feedback, and support messages.</li>
           <li>Hosting, database, email, monitoring, security, and professional-service providers may process operational information on our behalf.</li>
         </ul>
         <p>We may also disclose information during a business transaction, with your direction or consent, or when reasonably necessary to comply with law or protect rights and safety. We do not sell personal information for money.</p>

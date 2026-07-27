@@ -5,6 +5,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.WINDOW_SECONDS = exports.PLAN_LIMITS = void 0;
 exports.rateLimit = rateLimit;
+exports.publicRateLimit = publicRateLimit;
+const crypto_1 = require("crypto");
 const ioredis_1 = __importDefault(require("ioredis"));
 const WINDOW_SECONDS = 60;
 exports.WINDOW_SECONDS = WINDOW_SECONDS;
@@ -89,6 +91,32 @@ function rateLimit(bucket) {
                 error: `Too many ${bucket} requests. Try again in ${usage.ttl} seconds.`,
                 retry_after_seconds: usage.ttl,
             });
+            return;
+        }
+        next();
+    };
+}
+function publicRateLimit(bucket, limit, identity) {
+    return async (req, res, next) => {
+        const forwarded = req.headers['x-forwarded-for'];
+        const ip = (Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(',')[0])?.trim() || req.ip || 'unknown';
+        const suppliedIdentity = identity?.(req);
+        const digest = (value) => (0, crypto_1.createHash)('sha256').update(value).digest('hex');
+        const prefix = `marsfield:rate-limit:public:${bucket}`;
+        const keys = [`${prefix}:ip:${digest(ip)}`];
+        if (suppliedIdentity)
+            keys.push(`${prefix}:identity:${digest(suppliedIdentity.toLowerCase())}`);
+        const usage = await consume(keys);
+        if (!usage) {
+            next();
+            return;
+        }
+        res.setHeader('RateLimit-Limit', String(limit));
+        res.setHeader('RateLimit-Remaining', String(Math.max(0, limit - usage.count)));
+        res.setHeader('RateLimit-Reset', String(usage.ttl));
+        if (usage.count > limit) {
+            res.setHeader('Retry-After', String(usage.ttl));
+            res.status(429).json({ error: 'Too many recovery attempts. Please try again later.', retry_after_seconds: usage.ttl });
             return;
         }
         next();
