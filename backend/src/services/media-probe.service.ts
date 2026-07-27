@@ -4,7 +4,7 @@ import sharp from 'sharp';
 
 const execFileAsync = promisify(execFile);
 
-export async function getRemoteVideoDuration(sourceUrl: string): Promise<number> {
+export async function getRemoteMediaDuration(sourceUrl: string): Promise<number> {
   const { stdout } = await execFileAsync('ffprobe', [
     '-v', 'error',
     '-show_entries', 'format=duration',
@@ -13,10 +13,12 @@ export async function getRemoteVideoDuration(sourceUrl: string): Promise<number>
   ], { timeout: 30_000, maxBuffer: 1024 * 1024 });
   const duration = Number(stdout.trim());
   if (!Number.isFinite(duration) || duration <= 0) {
-    throw new Error('Could not determine reference video duration');
+    throw new Error('Could not determine media duration');
   }
   return duration;
 }
+
+export const getRemoteVideoDuration = getRemoteMediaDuration;
 
 export async function getRemoteVideoMetadata(sourceUrl: string): Promise<{
   duration: number;

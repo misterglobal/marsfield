@@ -22,6 +22,7 @@ const VIDEO_ENHANCEMENT_MODELS = (0, model_registry_1.modelIdsForFamily)('video-
 const IMAGE_UPSCALE_MODELS = (0, model_registry_1.modelIdsForFamily)('image-upscale');
 const KLING_REFERENCE_MIN_SECONDS = 3;
 const KLING_REFERENCE_MAX_SECONDS = 9.8;
+const LIP_SYNC_MAX_SECONDS = 60;
 function decodeFileInput(value, maximumBytes) {
     if (typeof value !== 'string') {
         throw new Error('Reference inputs must be URLs or data URIs');
@@ -278,7 +279,9 @@ router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1
                 const mode = params?.mode || 'pro';
                 if (!['standard', 'pro'].includes(mode))
                     throw new Error('Kling mode must be standard or pro');
-                billingParams.duration = referenceDuration;
+                // Kling renders a 15-second output for this workflow, so bill the same
+                // duration sent to the provider rather than the shorter source clip.
+                billingParams.duration = 15;
                 billingParams.mode = mode;
                 predictionInput = {
                     prompt: prompt.trim(),
@@ -392,6 +395,11 @@ router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1
                 const audio = await resolveOwnedStorageObject(user.id, req.body.audio_storage_object_id, 'audio/', 'Lip-sync audio');
                 if (!image || !audio)
                     throw new Error('Lip-sync requires a stored image and audio file');
+                const audioDuration = await (0, media_probe_service_1.getRemoteMediaDuration)(audio);
+                if (audioDuration > LIP_SYNC_MAX_SECONDS) {
+                    throw new Error(`Lip-sync audio is limited to ${LIP_SYNC_MAX_SECONDS} seconds`);
+                }
+                billingParams.duration = audioDuration;
                 if (!['bytedance/omni-human', 'bytedance/omni-human-1.5', 'prunaai/p-video-avatar'].includes(model)) {
                     throw new Error('Selected model does not support uploaded image and audio lip-sync');
                 }
@@ -600,15 +608,6 @@ router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1
             res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid billing parameters' });
             return;
         }
-        const remainingCredits = user.creditsLimit - user.creditsUsed;
-        if (billingQuote.totalCredits > remainingCredits) {
-            res.status(403).json({
-                error: 'Generation quota exceeded. Please upgrade plan.',
-                credits_required: billingQuote.totalCredits,
-                credits_remaining: Math.max(0, remainingCredits),
-            });
-            return;
-        }
         const projectId = typeof req.body.project_id === 'string' ? req.body.project_id : undefined;
         const storyboardSceneId = typeof req.body.storyboard_scene_id === 'string' ? req.body.storyboard_scene_id : undefined;
         if (projectId) {
@@ -703,91 +702,143 @@ router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1
             : undefined;
         const variationGroupId = billingQuote.variationCount > 1 ? (0, crypto_1.randomUUID)() : undefined;
         const submittedPredictions = [];
-        for (let variationIndex = 0; variationIndex < billingQuote.variationCount; variationIndex++) {
-            const variantInput = {
-                ...predictionInput,
-                seed: Number.isInteger(predictionInput.seed)
-                    ? predictionInput.seed + variationIndex
-                    : predictionInput.seed,
-            };
-            const repPrediction = await replicateService.createPrediction(model, variantInput, webhookUrl);
-            // Save Prediction in DB
-            const prediction = await prisma.prediction.create({
-                data: {
-                    userId: user.id,
-                    projectId,
-                    storyboardSceneId,
-                    workflow,
-                    model,
-                    prompt: typeof predictionInput.prompt === 'string' ? predictionInput.prompt : prompt || null,
-                    inputParams: isSeedance
-                        ? {
-                            duration: params?.duration ?? 5,
-                            resolution: params?.resolution || '720p',
-                            aspect_ratio: params?.aspect_ratio || '16:9',
-                            generate_audio: params?.generate_audio !== false,
-                            seed: Number.isInteger(params?.seed) ? params.seed + variationIndex : null,
-                            reference_image_count: params?.reference_image_ids?.length || params?.reference_images?.length || 0,
-                            reference_video_count: params?.reference_video_ids?.length || params?.reference_videos?.length || 0,
-                            reference_audio_count: params?.reference_audio_ids?.length || params?.reference_audio?.length || 0,
-                            has_first_frame: Boolean(params?.first_frame_image_id || params?.first_frame_image),
-                            has_last_frame: Boolean(params?.last_frame_image_id || params?.last_frame_image),
-                        }
-                        : {
-                            ...(params || {}),
-                            seed: Number.isInteger(params?.seed)
-                                ? (params.seed + variationIndex)
-                                : params?.seed,
-                        },
-                    variationGroupId,
-                    variationIndex,
-                    variationCount: billingQuote.variationCount,
-                    creditCost: variationIndex === 0 || model === 'google/nano-banana-pro'
-                        ? billingQuote.baseCredits
-                        : Math.ceil(billingQuote.baseCredits * 0.75),
-                    status: repPrediction.status,
-                    replicatePredictionId: repPrediction.id,
-                    outputUrl: repPrediction.outputUrl || null,
-                    completedAt: repPrediction.status === 'succeeded' ? new Date() : null,
-                },
+        let acceptedCredits = 0;
+        let acceptedVariations = 0;
+        // Reserve the full quote atomically before starting any paid provider work.
+        // The conditional UPDATE prevents concurrent requests from spending the
+        // same remaining balance.
+        const reserved = await prisma.$executeRaw `
+      UPDATE users
+      SET credits_used = credits_used + ${billingQuote.totalCredits}
+      WHERE id = ${user.id}
+        AND credits_used + ${billingQuote.totalCredits} <= credits_limit
+    `;
+        if (reserved !== 1) {
+            const account = await prisma.user.findUnique({
+                where: { id: user.id },
+                select: { creditsUsed: true, creditsLimit: true },
             });
-            submittedPredictions.push(prediction);
-            // Register job inside queue tracker (for async checks if not webhook verified)
-            if (repPrediction.status !== 'succeeded') {
-                await queue_service_1.queueService.addGenerationJob({
-                    predictionId: prediction.id,
-                    replicatePredictionId: repPrediction.id,
-                    model,
+            const remainingCredits = account ? account.creditsLimit - account.creditsUsed : 0;
+            res.status(403).json({
+                error: 'Generation quota exceeded. Please upgrade plan.',
+                credits_required: billingQuote.totalCredits,
+                credits_remaining: Math.max(0, remainingCredits),
+            });
+            return;
+        }
+        try {
+            for (let variationIndex = 0; variationIndex < billingQuote.variationCount; variationIndex++) {
+                const variantInput = {
+                    ...predictionInput,
+                    seed: Number.isInteger(predictionInput.seed)
+                        ? predictionInput.seed + variationIndex
+                        : predictionInput.seed,
+                };
+                const variationCreditCost = variationIndex === 0 || model === 'google/nano-banana-pro'
+                    ? billingQuote.baseCredits
+                    : Math.ceil(billingQuote.baseCredits * 0.75);
+                const repPrediction = await replicateService.createPrediction(model, variantInput, webhookUrl);
+                // Once the provider accepts a job it is billable even if a later local
+                // persistence or queue operation fails.
+                acceptedCredits += variationCreditCost;
+                acceptedVariations += 1;
+                // Save Prediction in DB
+                const prediction = await prisma.prediction.create({
+                    data: {
+                        userId: user.id,
+                        projectId,
+                        storyboardSceneId,
+                        workflow,
+                        model,
+                        prompt: typeof predictionInput.prompt === 'string' ? predictionInput.prompt : prompt || null,
+                        inputParams: isSeedance
+                            ? {
+                                duration: params?.duration ?? 5,
+                                resolution: params?.resolution || '720p',
+                                aspect_ratio: params?.aspect_ratio || '16:9',
+                                generate_audio: params?.generate_audio !== false,
+                                seed: Number.isInteger(params?.seed) ? params.seed + variationIndex : null,
+                                reference_image_count: params?.reference_image_ids?.length || params?.reference_images?.length || 0,
+                                reference_video_count: params?.reference_video_ids?.length || params?.reference_videos?.length || 0,
+                                reference_audio_count: params?.reference_audio_ids?.length || params?.reference_audio?.length || 0,
+                                has_first_frame: Boolean(params?.first_frame_image_id || params?.first_frame_image),
+                                has_last_frame: Boolean(params?.last_frame_image_id || params?.last_frame_image),
+                            }
+                            : {
+                                ...(params || {}),
+                                seed: Number.isInteger(params?.seed)
+                                    ? (params.seed + variationIndex)
+                                    : params?.seed,
+                            },
+                        variationGroupId,
+                        variationIndex,
+                        variationCount: billingQuote.variationCount,
+                        creditCost: variationCreditCost,
+                        status: repPrediction.status,
+                        replicatePredictionId: repPrediction.id,
+                        outputUrl: repPrediction.outputUrl || null,
+                        completedAt: repPrediction.status === 'succeeded' ? new Date() : null,
+                    },
                 });
-            }
-            else if (repPrediction.outputUrl) {
-                // Create user asset immediately if succeeded synchronously
-                await (0, asset_service_1.createAssetForPrediction)(prediction, repPrediction.outputUrl);
-                if (workflow === 'video-caption' && repPrediction.outputUrls?.[1]) {
-                    await (0, asset_service_1.createSupplementaryAssetForPrediction)(prediction, repPrediction.outputUrls[1], 'document');
+                submittedPredictions.push(prediction);
+                // Register job inside queue tracker (for async checks if not webhook verified)
+                if (repPrediction.status !== 'succeeded') {
+                    await queue_service_1.queueService.addGenerationJob({
+                        predictionId: prediction.id,
+                        replicatePredictionId: repPrediction.id,
+                        model,
+                    });
+                }
+                else if (repPrediction.outputUrl) {
+                    // Create user asset immediately if succeeded synchronously
+                    await (0, asset_service_1.createAssetForPrediction)(prediction, repPrediction.outputUrl);
+                    if (workflow === 'video-caption' && repPrediction.outputUrls?.[1]) {
+                        await (0, asset_service_1.createSupplementaryAssetForPrediction)(prediction, repPrediction.outputUrls[1], 'document');
+                    }
                 }
             }
         }
-        await prisma.$transaction([
-            prisma.user.update({
-                where: { id: user.id },
-                data: { creditsUsed: { increment: billingQuote.totalCredits } },
-            }),
-            prisma.usageEvent.create({
-                data: {
-                    userId: user.id,
-                    predictionId: submittedPredictions[0]?.id,
-                    eventType: 'generation',
-                    credits: billingQuote.totalCredits,
-                    metadata: {
-                        workflow,
-                        model,
-                        variation_count: billingQuote.variationCount,
-                        variation_group_id: variationGroupId,
-                    },
+        catch (error) {
+            const refundCredits = billingQuote.totalCredits - acceptedCredits;
+            await prisma.$transaction([
+                ...(refundCredits > 0 ? [prisma.$executeRaw `
+          UPDATE users
+          SET credits_used = GREATEST(0, credits_used - ${refundCredits})
+          WHERE id = ${user.id}
+        `] : []),
+                ...(acceptedCredits > 0 ? [prisma.usageEvent.create({
+                        data: {
+                            userId: user.id,
+                            predictionId: submittedPredictions[0]?.id,
+                            eventType: 'generation',
+                            credits: acceptedCredits,
+                            metadata: {
+                                workflow,
+                                model,
+                                variation_count_requested: billingQuote.variationCount,
+                                variation_count_accepted: acceptedVariations,
+                                variation_group_id: variationGroupId,
+                                partial_submission: true,
+                            },
+                        },
+                    })] : []),
+            ]);
+            throw error;
+        }
+        await prisma.usageEvent.create({
+            data: {
+                userId: user.id,
+                predictionId: submittedPredictions[0]?.id,
+                eventType: 'generation',
+                credits: billingQuote.totalCredits,
+                metadata: {
+                    workflow,
+                    model,
+                    variation_count: billingQuote.variationCount,
+                    variation_group_id: variationGroupId,
                 },
-            }),
-        ]);
+            },
+        });
         const primaryPrediction = submittedPredictions[0];
         res.status(201).json({
             id: primaryPrediction.id,

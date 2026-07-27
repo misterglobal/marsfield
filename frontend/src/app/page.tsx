@@ -291,7 +291,7 @@ export default function StudioPage() {
     if (workflow === 'text-to-image') return 1;
     const effectiveDuration = duration === -1 ? 15 : duration;
     if (model === 'kwaivgi/kling-v3-omni-video') {
-      return Math.ceil(referenceVideoDuration || effectiveDuration) * (klingMode === 'standard' ? 5 : 7);
+      return 15 * (klingMode === 'standard' ? 5 : 7);
     }
     if (model === 'xai/grok-imagine-video-1.5') return Math.ceil(effectiveDuration) * 2;
     const durationBlocks = Math.max(1, Math.ceil(effectiveDuration / 5));
