@@ -44,11 +44,12 @@ export default function RootLayout({
   const [user, setUser] = useState<UserInfo | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [showLogin, setShowLogin] = useState(false);
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot'>('login');
   const [loginEmail, setLoginEmail] = useState('creator@marsfield.ai');
   const [loginPassword, setLoginPassword] = useState('password123');
   const [registerName, setRegisterName] = useState('');
   const [loginError, setLoginError] = useState('');
+  const [recoveryMessage, setRecoveryMessage] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackType, setFeedbackType] = useState('bug');
@@ -97,6 +98,20 @@ export default function RootLayout({
       setAuthMode('login');
     } catch (err: any) {
       setLoginError(err.message || 'Account creation failed');
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async (email: string) => {
+    setLoginLoading(true);
+    setLoginError('');
+    setRecoveryMessage('');
+    try {
+      const data = await api.forgotPassword(email);
+      setRecoveryMessage(data.message);
+    } catch (err: any) {
+      setLoginError(err.message || 'Could not request a recovery link');
     } finally {
       setLoginLoading(false);
     }
@@ -397,17 +412,24 @@ export default function RootLayout({
                 onClick={(e) => e.stopPropagation()}
               >
                 <h2 style={{ margin: 0, fontFamily: "var(--font-display)", fontSize: "1.3rem" }}>
-                  {authMode === 'login' ? 'Sign In to Marsfield' : 'Create your Marsfield account'}
+                  {authMode === 'login' ? 'Sign In to Marsfield' : authMode === 'register' ? 'Create your Marsfield account' : 'Recover your account'}
                 </h2>
                 <p style={{ color: "var(--foreground-muted)", fontSize: "0.85rem", margin: 0 }}>
                   {authMode === 'login'
                     ? 'Enter your credentials to access the studio.'
-                    : 'Start with 15 generation credits and your own asset library.'}
+                    : authMode === 'register'
+                      ? 'Start with 15 generation credits and your own asset library.'
+                      : 'Enter your email and we will send a single-use reset link if an account exists.'}
                 </p>
 
                 {loginError && (
                   <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", padding: "0.75rem", borderRadius: "8px", fontSize: "0.85rem", color: "#ef4444" }}>
                     {loginError}
+                  </div>
+                )}
+                {recoveryMessage && (
+                  <div style={{ background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.3)", padding: "0.75rem", borderRadius: "8px", fontSize: "0.85rem", color: "#86efac" }}>
+                    {recoveryMessage}
                   </div>
                 )}
 
@@ -432,7 +454,7 @@ export default function RootLayout({
                     onChange={(e) => setLoginEmail(e.target.value)}
                   />
                 </div>
-                <div>
+                {authMode !== 'forgot' && <div>
                   <label className="form-label">Password</label>
                   <input
                     type="password"
@@ -445,7 +467,7 @@ export default function RootLayout({
                       Use at least 8 characters.
                     </p>
                   )}
-                </div>
+                </div>}
                 {authMode === 'register' && (
                   <p style={{ color: "var(--foreground-muted)", fontSize: "0.72rem", margin: 0, lineHeight: 1.5 }}>
                     By creating an account, you agree to the <Link href="/terms" onClick={() => setShowLogin(false)}>Terms of Service</Link> and acknowledge the <Link href="/privacy" onClick={() => setShowLogin(false)}>Privacy Policy</Link>.
@@ -457,20 +479,36 @@ export default function RootLayout({
                   onClick={() => {
                     if (authMode === 'login') {
                       void handleLogin(loginEmail, loginPassword);
-                    } else {
+                    } else if (authMode === 'register') {
                       void handleRegister(loginEmail, loginPassword, registerName);
+                    } else {
+                      void handleForgotPassword(loginEmail);
                     }
                   }}
                   disabled={loginLoading}
                 >
                   {loginLoading
-                    ? authMode === 'login' ? "Signing in..." : "Creating account..."
-                    : authMode === 'login' ? "Sign In" : "Create Account"}
+                    ? authMode === 'login' ? "Signing in..." : authMode === 'register' ? "Creating account..." : "Sending link..."
+                    : authMode === 'login' ? "Sign In" : authMode === 'register' ? "Create Account" : "Send recovery link"}
                 </button>
+                {authMode === 'login' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLoginError('');
+                      setRecoveryMessage('');
+                      setAuthMode('forgot');
+                    }}
+                    style={{ background: "none", border: "none", color: "var(--foreground-muted)", cursor: "pointer", fontSize: "0.82rem", textDecoration: "underline" }}
+                  >
+                    Forgot your password?
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
                     setLoginError('');
+                    setRecoveryMessage('');
                     setAuthMode((mode) => (mode === 'login' ? 'register' : 'login'));
                   }}
                   style={{
@@ -484,7 +522,7 @@ export default function RootLayout({
                 >
                   {authMode === 'login'
                     ? "Need an account? Create one"
-                    : "Already have an account? Sign in"}
+                    : authMode === 'register' ? "Already have an account? Sign in" : "Back to sign in"}
                 </button>
               </div>
             </div>

@@ -84,7 +84,7 @@ export async function authMiddleware(
       return;
     }
 
-    const payload = verified as JwtPayload & { userId?: string };
+    const payload = verified as JwtPayload & { userId?: string; authVersion?: number };
     const userId = (payload as any).userId as string | undefined;
     if (!userId) {
       res.status(401).json({ error: 'Invalid token payload' });
@@ -99,15 +99,17 @@ export async function authMiddleware(
         plan: true,
         creditsUsed: true,
         creditsLimit: true,
+        authVersion: true,
       },
     });
 
-    if (!user) {
+    if (!user || user.authVersion !== (payload.authVersion ?? 0)) {
       res.status(401).json({ error: 'User associated with token not found' });
       return;
     }
 
-    req.user = user;
+    const { authVersion: _authVersion, ...authenticatedUser } = user;
+    req.user = authenticatedUser;
     req.authType = 'jwt';
     req.credentialId = user.id;
     next();
