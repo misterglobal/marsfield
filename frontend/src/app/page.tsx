@@ -24,6 +24,7 @@ interface VariationResult {
   id: string;
   status: string;
   url?: string;
+  assetId?: string;
   variationIndex: number;
   type: string;
 }
@@ -110,7 +111,7 @@ export default function StudioPage() {
   const [generationProgress, setGenerationProgress] = useState(0);
   const [generationStatus, setGenerationStatus] = useState('');
   const [generationError, setGenerationError] = useState('');
-  const [lastGeneratedAsset, setLastGeneratedAsset] = useState<{ id: string; url: string; type: string } | null>(null);
+  const [lastGeneratedAsset, setLastGeneratedAsset] = useState<{ id: string; url: string; type: string; assetId?: string } | null>(null);
   const [variationResults, setVariationResults] = useState<VariationResult[]>([]);
   const [pollAbortSignal, setPollAbortSignal] = useState<AbortController | null>(null);
   
@@ -193,6 +194,8 @@ export default function StudioPage() {
     const query = new URLSearchParams(window.location.search);
     const projectId = query.get('project_id');
     const sceneId = query.get('scene_id');
+    const requestedWorkflow = query.get('workflow');
+    const requestedModel = query.get('model');
     if (!projectId || !sceneId) return;
 
     void api.getProject(projectId).then((project) => {
@@ -215,7 +218,13 @@ export default function StudioPage() {
       setSelectedSceneId(sceneId);
       setPrompt([scene.prompt || '', kitGuidance.length ? `Project continuity rules:\n${kitGuidance.join('\n')}` : ''].filter(Boolean).join('\n\n'));
       if (scene.durationSeconds) setDuration(scene.durationSeconds);
-      if (kitReferences.length) {
+      if (requestedWorkflow === 'text-to-image') {
+        setWorkflow('text-to-image');
+        setModel(requestedModel || 'google/nano-banana-2');
+      } else if (requestedWorkflow) {
+        setWorkflow(requestedWorkflow);
+        if (requestedModel) setModel(requestedModel);
+      } else if (kitReferences.length) {
         setReferenceImages(kitReferences);
         setWorkflow('multimodal-video');
         setModel('bytedance/seedance-2.0');
@@ -282,7 +291,7 @@ export default function StudioPage() {
     if (workflow === 'text-to-image') return 1;
     const effectiveDuration = duration === -1 ? 15 : duration;
     if (model === 'kwaivgi/kling-v3-omni-video') {
-      return Math.ceil(referenceVideoDuration || effectiveDuration) * (klingMode === 'standard' ? 5 : 7);
+      return 15 * (klingMode === 'standard' ? 5 : 7);
     }
     if (model === 'xai/grok-imagine-video-1.5') return Math.ceil(effectiveDuration) * 2;
     const durationBlocks = Math.max(1, Math.ceil(effectiveDuration / 5));
@@ -563,6 +572,29 @@ export default function StudioPage() {
     .filter((asset) => supportedLibraryTypes.includes(asset.type) && asset.storageObjectId)
     .slice(0, 12);
 
+  const resultActionHref = (assetId: string, targetWorkflow: string, targetModel?: string) => {
+    const query = new URLSearchParams({ workflow: targetWorkflow, asset_id: assetId });
+    if (targetModel) query.set('model', targetModel);
+    return `/?${query.toString()}`;
+  };
+
+  const resultActions = (asset?: { assetId?: string; type?: string } | null) => {
+    if (!asset?.assetId) return [];
+    if (asset.type === 'image') return [
+      { label: 'Animate', href: resultActionHref(asset.assetId, 'image-to-video') },
+      { label: 'Upscale', href: resultActionHref(asset.assetId, 'image-upscale') },
+      { label: 'Save to kit', href: `/kits?asset_id=${encodeURIComponent(asset.assetId)}` },
+      { label: 'Open library', href: '/library' },
+    ];
+    if (asset.type === 'video') return [
+      { label: 'Add captions', href: resultActionHref(asset.assetId, 'video-caption') },
+      { label: 'Resize', href: resultActionHref(asset.assetId, 'social-resize') },
+      { label: 'Enhance', href: resultActionHref(asset.assetId, 'video-enhance') },
+      { label: 'Open library', href: '/library' },
+    ];
+    return [{ label: 'Open library', href: '/library' }];
+  };
+
   const isLibraryAssetSelected = (asset: LibraryAsset) => {
     const storageId = asset.storageObjectId || '';
     if (workflow === 'image-to-video') return imageStorageObjectId === storageId;
@@ -700,9 +732,9 @@ export default function StudioPage() {
       try {
         const data = await api.getPrediction(id);
         if (data.status === 'succeeded' && data.output_url) {
-          const type = workflow === 'text-to-image' ? 'image' : 'video';
+          const type = data.asset_type || (workflow === 'text-to-image' ? 'image' : 'video');
           setVariationResults((current) => current.map((item) =>
-            item.id === id ? { ...item, status: 'succeeded', url: data.output_url, type } : item
+            item.id === id ? { ...item, status: 'succeeded', url: data.output_url, type, assetId: data.asset_id } : item
           ));
           setGenerationProgress(100);
           setGenerationStatus('succeeded');
@@ -710,6 +742,7 @@ export default function StudioPage() {
             id,
             url: data.output_url,
             type,
+            assetId: data.asset_id,
           });
           setTimeout(() => setIsGenerating(false), 1500);
           return;
@@ -926,6 +959,7 @@ export default function StudioPage() {
         id: prediction.id,
         status: prediction.status,
         url: prediction.output_url,
+        assetId: prediction.asset_id,
         variationIndex: prediction.variation_index ?? 0,
         type: resultType,
       })));
@@ -939,7 +973,8 @@ export default function StudioPage() {
         setLastGeneratedAsset({
           id: data.id,
           url: data.output_url,
-          type: workflow.includes('image') && workflow !== 'image-to-video' ? 'image' : 'video'
+          type: data.asset_type || (workflow.includes('image') && workflow !== 'image-to-video' ? 'image' : 'video'),
+          assetId: data.asset_id,
         });
         setTimeout(() => setIsGenerating(false), 1500);
       } else {
@@ -1610,6 +1645,15 @@ export default function StudioPage() {
                 ✨ Create New
               </button>
             </div>
+            {resultActions(lastGeneratedAsset).length > 0 && (
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                {resultActions(lastGeneratedAsset).map((action) => (
+                  <a key={action.label} href={action.href} className="btn btn-secondary" style={{ padding: '0.45rem 0.7rem', fontSize: '0.78rem', textDecoration: 'none' }}>
+                    {action.label}
+                  </a>
+                ))}
+              </div>
+            )}
             {variationResults.length > 1 && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.75rem' }}>
                 {variationResults.map((result) => (
@@ -1627,6 +1671,15 @@ export default function StudioPage() {
                     ) : (
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '90px', borderRadius: '8px', background: 'rgba(0,0,0,0.25)', color: 'var(--foreground-muted)', fontSize: '0.8rem' }}>
                         Processing...
+                      </div>
+                    )}
+                    {result.url && resultActions(result).length > 0 && (
+                      <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.55rem' }}>
+                        {resultActions(result).slice(0, 3).map((action) => (
+                          <a key={action.label} href={action.href} className="btn btn-secondary" style={{ padding: '0.3rem 0.45rem', fontSize: '0.68rem', textDecoration: 'none' }}>
+                            {action.label}
+                          </a>
+                        ))}
                       </div>
                     )}
                   </div>

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, useEffect, createContext, useContext } from "react";
+import { useState, useEffect, createContext, useContext, type FormEvent } from "react";
 import { api } from "@/lib/api";
 import "./globals.css";
 
@@ -50,6 +50,11 @@ export default function RootLayout({
   const [registerName, setRegisterName] = useState('');
   const [loginError, setLoginError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [feedbackType, setFeedbackType] = useState('bug');
+  const [feedbackMessage, setFeedbackMessage] = useState('');
+  const [feedbackStatus, setFeedbackStatus] = useState('');
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -104,7 +109,39 @@ export default function RootLayout({
     setUser(null);
   };
 
+  const handleFeedbackSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setFeedbackStatus('');
+    setFeedbackLoading(true);
+    try {
+      await api.submitFeedback({
+        type: feedbackType,
+        message: feedbackMessage,
+        page_url: typeof window !== 'undefined' ? window.location.href : pathname,
+        user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
+        context: {
+          pathname,
+          viewport: typeof window !== 'undefined' ? {
+            width: window.innerWidth,
+            height: window.innerHeight,
+          } : undefined,
+        },
+      });
+      setFeedbackStatus('Thanks — your feedback was sent.');
+      setFeedbackMessage('');
+      window.setTimeout(() => {
+        setShowFeedback(false);
+        setFeedbackStatus('');
+      }, 1200);
+    } catch (err: any) {
+      setFeedbackStatus(err.message || 'Failed to send feedback');
+    } finally {
+      setFeedbackLoading(false);
+    }
+  };
+
   const menuItems = [
+    { name: "YouTube Planner", href: "/youtube", icon: "YT" },
     { name: "Video Studio", href: "/", icon: "🎬" },
     { name: "Projects", href: "/projects", icon: "🗂️" },
     { name: "Asset Library", href: "/library", icon: "📁" },
@@ -147,6 +184,14 @@ export default function RootLayout({
                   <div style={{ fontSize: "0.85rem", color: "var(--foreground-muted)" }}>
                     {user.email}
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowFeedback(true)}
+                    className="btn btn-secondary"
+                    style={{ width: "100%", padding: "0.65rem 0.8rem", fontSize: "0.82rem" }}
+                  >
+                    Report a problem
+                  </button>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <span className="badge badge-purple">Connected</span>
                     <button
@@ -198,6 +243,7 @@ export default function RootLayout({
                       {(user.name || user.email).charAt(0).toUpperCase()}
                     </div>
                     <button className="mobile-only mobile-account-button" onClick={handleLogout}>Logout</button>
+                    <button className="mobile-only mobile-account-button" onClick={() => setShowFeedback(true)}>Feedback</button>
                   </>
                 ) : (
                   <button className="mobile-sign-in" onClick={() => setShowLogin(true)}>Sign in</button>
@@ -221,6 +267,108 @@ export default function RootLayout({
               );
             })}
           </nav>
+
+          {user && (
+            <button
+              type="button"
+              onClick={() => setShowFeedback(true)}
+              aria-label="Feedback"
+              className="feedback-floating-button"
+            >
+              Feedback
+            </button>
+          )}
+
+          {showFeedback && user && (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.7)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 1100,
+                backdropFilter: "blur(6px)",
+                padding: "1rem",
+              }}
+              onClick={() => setShowFeedback(false)}
+            >
+              <form
+                className="glass-card auth-modal"
+                onSubmit={handleFeedbackSubmit}
+                style={{
+                  width: "min(520px, 100%)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "1rem",
+                  padding: "1.5rem",
+                }}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "start" }}>
+                  <div>
+                    <h2 style={{ margin: 0, fontFamily: "var(--font-display)", fontSize: "1.2rem" }}>Send feedback</h2>
+                    <p style={{ color: "var(--foreground-muted)", fontSize: "0.85rem", margin: "0.35rem 0 0" }}>
+                      Tell us what went wrong. We’ll include your account, page, and browser context.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowFeedback(false)}
+                    style={{ background: "none", border: "none", color: "var(--foreground-muted)", cursor: "pointer", fontSize: "1.4rem" }}
+                    aria-label="Close feedback form"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <div>
+                  <label className="form-label" htmlFor="feedback-type">Issue type</label>
+                  <select id="feedback-type" className="form-input" value={feedbackType} onChange={(event) => setFeedbackType(event.target.value)}>
+                    <option value="bug">Bug</option>
+                    <option value="generation_failed">Generation failed</option>
+                    <option value="upload_issue">Upload issue</option>
+                    <option value="billing">Billing</option>
+                    <option value="feature_request">Feature request</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="form-label" htmlFor="feedback-message">What happened?</label>
+                  <textarea
+                    id="feedback-message"
+                    className="form-input"
+                    value={feedbackMessage}
+                    minLength={10}
+                    rows={6}
+                    placeholder="Example: I uploaded a 9.8s clip and Kling edit still rejected it..."
+                    onChange={(event) => setFeedbackMessage(event.target.value)}
+                    required
+                    style={{ resize: "vertical" }}
+                  />
+                </div>
+
+                {feedbackStatus && (
+                  <div style={{
+                    background: feedbackStatus.startsWith('Thanks') ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.1)",
+                    border: feedbackStatus.startsWith('Thanks') ? "1px solid rgba(34,197,94,0.3)" : "1px solid rgba(239,68,68,0.3)",
+                    padding: "0.75rem",
+                    borderRadius: "8px",
+                    fontSize: "0.85rem",
+                    color: feedbackStatus.startsWith('Thanks') ? "#86efac" : "#ef4444",
+                  }}>
+                    {feedbackStatus}
+                  </div>
+                )}
+
+                <button className="btn btn-primary" disabled={feedbackLoading || feedbackMessage.trim().length < 10}>
+                  {feedbackLoading ? "Sending..." : "Send feedback"}
+                </button>
+              </form>
+            </div>
+          )}
 
           {/* Login Modal Overlay */}
           {showLogin && (

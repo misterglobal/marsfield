@@ -29,20 +29,24 @@ test('batch resizes an owned video into all social formats without credits', asy
     'POST /api/v1/generate': async (route) => {
       submitted = route.request().postDataJSON();
       await route.fulfill({
+        status: 202,
         json: {
           id: 'resize-vertical',
-          status: 'succeeded',
-          output_url: 'https://example.com/vertical.mp4',
+          status: 'processing',
+          output_url: null,
           credits_charged: 0,
           variation_group_id: 'resize-group-1',
           predictions: [
-            { id: 'resize-vertical', status: 'succeeded', output_url: 'https://example.com/vertical.mp4', variation_index: 0 },
-            { id: 'resize-square', status: 'succeeded', output_url: 'https://example.com/square.mp4', variation_index: 1 },
-            { id: 'resize-landscape', status: 'succeeded', output_url: 'https://example.com/landscape.mp4', variation_index: 2 },
+            { id: 'resize-vertical', status: 'processing', output_url: null, variation_index: 0 },
+            { id: 'resize-square', status: 'processing', output_url: null, variation_index: 1 },
+            { id: 'resize-landscape', status: 'processing', output_url: null, variation_index: 2 },
           ],
         },
       });
     },
+    'GET /api/v1/predictions/resize-vertical': { id: 'resize-vertical', status: 'succeeded', output_url: 'https://example.com/vertical.mp4' },
+    'GET /api/v1/predictions/resize-square': { id: 'resize-square', status: 'succeeded', output_url: 'https://example.com/square.mp4' },
+    'GET /api/v1/predictions/resize-landscape': { id: 'resize-landscape', status: 'succeeded', output_url: 'https://example.com/landscape.mp4' },
   });
 
   await page.goto('/?workflow=social-resize&asset_id=video-1');

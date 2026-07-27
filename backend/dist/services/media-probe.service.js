@@ -3,14 +3,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getRemoteVideoDuration = getRemoteVideoDuration;
+exports.getRemoteVideoDuration = void 0;
+exports.getRemoteMediaDuration = getRemoteMediaDuration;
 exports.getRemoteVideoMetadata = getRemoteVideoMetadata;
 exports.getRemoteImageMegapixels = getRemoteImageMegapixels;
 const child_process_1 = require("child_process");
 const util_1 = require("util");
 const sharp_1 = __importDefault(require("sharp"));
 const execFileAsync = (0, util_1.promisify)(child_process_1.execFile);
-async function getRemoteVideoDuration(sourceUrl) {
+async function getRemoteMediaDuration(sourceUrl) {
     const { stdout } = await execFileAsync('ffprobe', [
         '-v', 'error',
         '-show_entries', 'format=duration',
@@ -19,10 +20,11 @@ async function getRemoteVideoDuration(sourceUrl) {
     ], { timeout: 30_000, maxBuffer: 1024 * 1024 });
     const duration = Number(stdout.trim());
     if (!Number.isFinite(duration) || duration <= 0) {
-        throw new Error('Could not determine reference video duration');
+        throw new Error('Could not determine media duration');
     }
     return duration;
 }
+exports.getRemoteVideoDuration = getRemoteMediaDuration;
 async function getRemoteVideoMetadata(sourceUrl) {
     const { stdout } = await execFileAsync('ffprobe', [
         '-v', 'error', '-select_streams', 'v:0',

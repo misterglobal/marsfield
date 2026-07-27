@@ -25,6 +25,8 @@ model User {
   usageEvents          UsageEvent[]
   storageObjects       StorageObject[]
   brandKits            BrandKit[]
+  youtubeProductions   YoutubeProduction[]
+  feedbackReports      FeedbackReport[]
   freemiusEntitlements FreemiusEntitlement[]
   billingEvents        BillingEvent[]
 
@@ -191,6 +193,26 @@ model BillingEvent {
   @@map("billing_events")
 }
 
+model FeedbackReport {
+  id             String    @id @default(uuid())
+  userId         String    @map("user_id")
+  user           User      @relation(fields: [userId], references: [id])
+  type           String
+  message        String
+  pageUrl        String?   @map("page_url")
+  userAgent      String?   @map("user_agent")
+  context        Json?
+  emailStatus    String    @default("pending") @map("email_status")
+  emailMessageId String?   @map("email_message_id")
+  emailError     String?   @map("email_error")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  sentAt         DateTime? @map("sent_at")
+
+  @@index([userId, createdAt])
+  @@index([emailStatus, createdAt])
+  @@map("feedback_reports")
+}
+
 model BrandKit {
   id                 String                 @id @default(uuid())
   userId             String                 @map("user_id")
@@ -237,6 +259,33 @@ model ProjectKitAssignment {
   @@id([projectId, brandKitId])
   @@index([brandKitId])
   @@map("project_kit_assignments")
+}
+
+model YoutubeProduction {
+  id                  String   @id @default(uuid())
+  userId              String   @map("user_id")
+  user                User     @relation(fields: [userId], references: [id])
+  projectId           String?  @map("project_id")
+  topic               String
+  audience            String?
+  targetDurationMin   Int      @default(8) @map("target_duration_min")
+  status              String   @default("draft")
+  research            Json?
+  strategy            Json?
+  script              Json?
+  storyboard          Json?
+  narration           Json?
+  captions            Json?
+  audio               Json?
+  seo                 Json?
+  thumbnailConcepts   Json?    @map("thumbnail_concepts")
+  estimatedCreditsMin Int      @default(200) @map("estimated_credits_min")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@index([userId, createdAt])
+  @@index([projectId])
+  @@map("youtube_productions")
 }
 
 model ApiKey {

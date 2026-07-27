@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const client_1 = require("@prisma/client");
+const crypto_1 = require("crypto");
 const asset_service_1 = require("../services/asset.service");
 const freemius_service_1 = require("../services/freemius.service");
 const router = (0, express_1.Router)();
@@ -89,51 +90,26 @@ router.post('/freemius', async (req, res) => {
         const expiration = (0, freemius_service_1.parseFreemiusDate)(fsLicense.expiration || fsLicense.expires || fsLicense.expiration_date);
         const licenseSaysCanceled = Boolean(fsLicense.is_canceled || fsLicense.isCancelled || fsLicense.cancelled);
         const isCanceled = licenseSaysCanceled || isCancellationEvent(eventType);
-        const providerEventId = getString(event.id) || `${eventType}:${fsLicenseId || fsUserId || Date.now()}`;
+        const providerEventId = getString(event.id)
+            || `${eventType}:${fsLicenseId || fsUserId || 'unknown'}:${(0, crypto_1.createHash)('sha256').update(rawBody).digest('hex')}`;
         const user = fsEmail
             ? await prisma.user.findUnique({ where: { email: fsEmail.toLowerCase() }, select: { id: true } })
             : null;
-        await prisma.billingEvent.upsert({
-            where: { providerEventId },
-            create: {
-                userId: user?.id,
-                providerEventId,
-                eventType,
-                payload: event,
-            },
-            update: {
-                userId: user?.id,
-                eventType,
-                payload: event,
-            },
-        });
         if (!user || !fsLicenseId) {
+            await prisma.billingEvent.upsert({
+                where: { providerEventId },
+                create: {
+                    userId: user?.id,
+                    providerEventId,
+                    eventType,
+                    payload: event,
+                },
+                update: {},
+            });
             console.warn(`Stored Freemius event ${eventType}, but no matching Marsfield user/license was found`);
             res.status(200).send('OK');
             return;
         }
-        await prisma.freemiusEntitlement.upsert({
-            where: { fsLicenseId },
-            create: {
-                userId: user.id,
-                fsLicenseId,
-                fsPlanId,
-                fsPricingId,
-                fsUserId,
-                type: licenseType,
-                expiration,
-                isCanceled,
-            },
-            update: {
-                userId: user.id,
-                fsPlanId,
-                fsPricingId,
-                fsUserId,
-                type: licenseType,
-                expiration,
-                isCanceled,
-            },
-        });
         const now = new Date();
         const entitlementIsActive = !isCanceled && (!expiration || expiration > now);
         const plan = entitlementIsActive ? (0, freemius_service_1.getPlanByFreemiusPlanId)(fsPlanId) || (0, freemius_service_1.getPlan)('free') : (0, freemius_service_1.getPlan)('free');
@@ -143,24 +119,73 @@ router.post('/freemius', async (req, res) => {
             storageLimitBytes: plan.storageLimitBytes,
             ...(shouldResetCredits(eventType) ? { creditsUsed: 0 } : {}),
         };
-        await prisma.user.update({
-            where: { id: user.id },
-            data: updateUserData,
-        });
-        if (shouldResetCredits(eventType)) {
-            await prisma.usageEvent.create({
-                data: {
+        const processed = await prisma.$transaction(async (tx) => {
+            // Claim the provider event once. The grant and entitlement changes are in
+            // the same transaction, so a failed attempt remains safe to retry.
+            const inserted = await tx.$queryRaw `
+        INSERT INTO billing_events (
+          id, user_id, provider, provider_event_id, event_type, payload, created_at
+        )
+        VALUES (
+          ${(0, crypto_1.randomUUID)()}, ${user.id}, 'freemius', ${providerEventId},
+          ${eventType}, CAST(${JSON.stringify(event)} AS jsonb), NOW()
+        )
+        ON CONFLICT (provider_event_id) DO UPDATE
+          SET user_id = EXCLUDED.user_id,
+              payload = EXCLUDED.payload
+          WHERE billing_events.user_id IS NULL
+        RETURNING id
+      `;
+            if (inserted.length === 0)
+                return false;
+            await tx.freemiusEntitlement.upsert({
+                where: { fsLicenseId },
+                create: {
                     userId: user.id,
-                    eventType: 'billing_credit_grant',
-                    credits: plan.creditsLimit,
-                    metadata: {
-                        provider: 'freemius',
-                        freemius_event_type: eventType,
-                        plan: plan.tier,
-                        license_id: fsLicenseId,
-                    },
+                    fsLicenseId,
+                    fsPlanId,
+                    fsPricingId,
+                    fsUserId,
+                    type: licenseType,
+                    expiration,
+                    isCanceled,
+                },
+                update: {
+                    userId: user.id,
+                    fsPlanId,
+                    fsPricingId,
+                    fsUserId,
+                    type: licenseType,
+                    expiration,
+                    isCanceled,
                 },
             });
+            await tx.user.update({
+                where: { id: user.id },
+                data: updateUserData,
+            });
+            if (shouldResetCredits(eventType)) {
+                await tx.usageEvent.create({
+                    data: {
+                        userId: user.id,
+                        eventType: 'billing_credit_grant',
+                        credits: plan.creditsLimit,
+                        metadata: {
+                            provider: 'freemius',
+                            provider_event_id: providerEventId,
+                            freemius_event_type: eventType,
+                            plan: plan.tier,
+                            license_id: fsLicenseId,
+                        },
+                    },
+                });
+            }
+            return true;
+        });
+        if (!processed) {
+            console.log(`Ignored duplicate Freemius event ${providerEventId}`);
+            res.status(200).send('OK');
+            return;
         }
         console.log(`Freemius event processed. Type: ${eventType}; User: ${user.id}; Plan: ${plan.tier}`);
         res.status(200).send('OK');

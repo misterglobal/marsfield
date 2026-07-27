@@ -82,6 +82,7 @@ export default function ProjectsPage() {
   const [timelineTitle, setTimelineTitle] = useState('Final timeline export');
   const [timelineExporting, setTimelineExporting] = useState(false);
   const [timelineResultUrl, setTimelineResultUrl] = useState('');
+  const [timelineResultAssetId, setTimelineResultAssetId] = useState('');
   const [planning, setPlanning] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -144,11 +145,13 @@ export default function ProjectsPage() {
     if (!token || !selectedProject) {
       setTimelineAssets([]);
       setTimelineClips([]);
+      setTimelineResultAssetId('');
       return;
     }
     void loadTimelineAssets(selectedProject.id);
     setTimelineClips([]);
     setTimelineResultUrl('');
+    setTimelineResultAssetId('');
   }, [token, selectedProject?.id, loadTimelineAssets]);
 
   const addTimelineClip = (asset: TimelineAsset) => {
@@ -206,6 +209,7 @@ export default function ProjectsPage() {
     if (!selectedProject || timelineClips.length === 0) return;
     setTimelineExporting(true);
     setTimelineResultUrl('');
+    setTimelineResultAssetId('');
     setError('');
     try {
       const payload = {
@@ -217,7 +221,23 @@ export default function ProjectsPage() {
         })),
       };
       const result = await api.exportTimeline(selectedProject.id, payload);
-      setTimelineResultUrl(result.output_url);
+      let outputUrl = result.output_url || '';
+      let outputAssetId = result.asset_id || '';
+      if (!outputUrl && result.id) {
+        for (let attempt = 0; attempt < 120; attempt++) {
+          const status = await api.getPrediction(result.id);
+          if (status.status === 'succeeded' && status.output_url) {
+            outputUrl = status.output_url;
+            outputAssetId = status.asset_id || '';
+            break;
+          }
+          if (status.status === 'failed') throw new Error(status.error || 'Timeline export failed');
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
+      }
+      if (!outputUrl) throw new Error('Timeline export is taking longer than expected. Check the Asset Library shortly.');
+      setTimelineResultUrl(outputUrl);
+      setTimelineResultAssetId(outputAssetId);
       setSelectedProject(await api.getProject(selectedProject.id));
       await loadTimelineAssets(selectedProject.id);
       await loadProjects();
@@ -410,9 +430,18 @@ export default function ProjectsPage() {
                 </button>
               </div>
               {timelineResultUrl && (
-                <a href={timelineResultUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)', fontSize: '0.85rem' }}>
-                  Timeline export ready — open video
-                </a>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <a href={timelineResultUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)', fontSize: '0.85rem' }}>
+                    Timeline export ready — open video
+                  </a>
+                  {timelineResultAssetId && (
+                    <>
+                      <a href={`/?workflow=video-caption&asset_id=${encodeURIComponent(timelineResultAssetId)}`} className="btn btn-secondary" style={{ padding: '0.4rem 0.6rem', fontSize: '0.72rem', textDecoration: 'none' }}>Add captions</a>
+                      <a href={`/?workflow=social-resize&asset_id=${encodeURIComponent(timelineResultAssetId)}`} className="btn btn-secondary" style={{ padding: '0.4rem 0.6rem', fontSize: '0.72rem', textDecoration: 'none' }}>Resize</a>
+                      <a href={`/?workflow=video-enhance&asset_id=${encodeURIComponent(timelineResultAssetId)}`} className="btn btn-secondary" style={{ padding: '0.4rem 0.6rem', fontSize: '0.72rem', textDecoration: 'none' }}>Enhance</a>
+                    </>
+                  )}
+                </div>
               )}
             </div>
 
@@ -487,25 +516,38 @@ export default function ProjectsPage() {
                     <p style={{ color: 'var(--foreground-muted)', fontSize: '0.9rem', marginBottom: 0 }}>{scene.prompt}</p>
                     <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
                       <a
-                        href={`/?project_id=${encodeURIComponent(selectedProject.id)}&scene_id=${encodeURIComponent(scene.id)}`}
+                        href={`/?project_id=${encodeURIComponent(selectedProject.id)}&scene_id=${encodeURIComponent(scene.id)}&workflow=text-to-image&model=google%2Fnano-banana-2`}
                         className="btn btn-primary"
                         style={{ textDecoration: 'none', padding: '0.55rem 0.9rem', fontSize: '0.8rem' }}
                       >
-                        Generate in Studio
+                        Generate image
+                      </a>
+                      <a
+                        href={`/?project_id=${encodeURIComponent(selectedProject.id)}&scene_id=${encodeURIComponent(scene.id)}`}
+                        className="btn btn-secondary"
+                        style={{ textDecoration: 'none', padding: '0.55rem 0.9rem', fontSize: '0.8rem' }}
+                      >
+                        Generate video
                       </a>
                       <button className="btn btn-secondary" type="button" onClick={() => editScene(scene)} style={{ padding: '0.55rem 0.9rem', fontSize: '0.8rem' }}>
                         Edit scene
                       </button>
                       {scene.predictions?.slice(0, 3).map((prediction) => {
                         const clip = scenePredictionToTimelineClip(scene, prediction);
+                        const imageAsset = prediction.assets?.find((asset) => asset.type === 'image' && asset.storageObjectId);
                         return (
                           <div key={prediction.id} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
                             {prediction.outputUrl ? (
                               <a href={prediction.outputUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)', fontSize: '0.8rem' }}>
-                                Result {prediction.status === 'succeeded' ? 'ready' : prediction.status}
+                                {prediction.workflow === 'text-to-image' ? 'Image' : 'Result'} {prediction.status === 'succeeded' ? 'ready' : prediction.status}
                               </a>
                             ) : (
                               <span className="badge badge-purple">{prediction.status}</span>
+                            )}
+                            {imageAsset && (
+                              <a href={`/?workflow=image-to-video&asset_id=${encodeURIComponent(imageAsset.id)}&project_id=${encodeURIComponent(selectedProject.id)}&scene_id=${encodeURIComponent(scene.id)}`} className="btn btn-secondary" style={{ padding: '0.45rem 0.7rem', fontSize: '0.78rem', textDecoration: 'none' }}>
+                                Animate image
+                              </a>
                             )}
                             {clip && (
                               <button className="btn btn-secondary" type="button" onClick={() => setTimelineClips((current) => [...current, clip])} style={{ padding: '0.45rem 0.7rem', fontSize: '0.78rem' }}>

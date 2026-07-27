@@ -128,11 +128,32 @@ export const api = {
     body: JSON.stringify(payload),
   }),
 
+  // YouTube dry-run production planner
+  getYoutubeProductions: () => request('/youtube/productions'),
+  getYoutubeProduction: (id: string) => request(`/youtube/productions/${id}`),
+  createYoutubeProduction: (payload: any) => request('/youtube/productions', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  createProjectFromYoutubeProduction: (id: string) => request(`/youtube/productions/${id}/create-project`, {
+    method: 'POST',
+  }),
+  createYoutubeNarrationPackage: (id: string, payload: any) => request(`/youtube/productions/${id}/narration-package`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+
   // Reusable character and brand kits
   getKits: () => request('/kits'),
   createKit: (payload: any) => request('/kits', { method: 'POST', body: JSON.stringify(payload) }),
   updateKit: (id: string, payload: any) => request(`/kits/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   deleteKit: (id: string) => request(`/kits/${id}`, { method: 'DELETE' }),
+
+  // Feedback
+  submitFeedback: (payload: any) => request('/feedback', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
 
   // Account
   getUsage: () => request('/account/usage'),
