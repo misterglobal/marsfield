@@ -60,10 +60,13 @@ router.post('/productions', auth_middleware_1.authMiddleware, (0, auth_middlewar
         const audience = typeof req.body.audience === 'string' ? req.body.audience.trim() : undefined;
         const targetDurationMin = Number(req.body.target_duration_min || 8);
         const angleCount = Number(req.body.angle_count || 8);
+        const format = typeof req.body.format === 'string' ? req.body.format : undefined;
+        const tone = typeof req.body.tone === 'string' ? req.body.tone : undefined;
+        const objective = typeof req.body.objective === 'string' ? req.body.objective : undefined;
         if (topic.length < 3 || topic.length > 180) {
             return void res.status(400).json({ error: 'Topic is required and must be under 180 characters' });
         }
-        const plan = (0, youtube_planner_service_1.planYoutubeProduction)({ topic, audience, targetDurationMin, angleCount });
+        const plan = (0, youtube_planner_service_1.planYoutubeProduction)({ topic, audience, targetDurationMin, angleCount, format, tone, objective });
         const production = await prisma.youtubeProduction.create({
             data: {
                 userId: req.user.id,
