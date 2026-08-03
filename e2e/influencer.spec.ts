@@ -17,6 +17,23 @@ const project = {
   storyboards: [], videoGenerations: [],
 };
 
+test('creates an influencer from a selected library reference image', async ({ page }) => {
+  let created: any;
+  await authenticate(page);
+  await mockApi(page, {
+    'GET /api/v1/assets': [{ id: 'portrait-asset', storageObjectId: 'portrait-storage', url: 'https://media.test/portrait.png', thumbnailUrl: 'https://media.test/portrait.png', type: 'image' }],
+    'GET /api/v1/influencer/influencers': [], 'GET /api/v1/influencer/products': [], 'GET /api/v1/influencer/projects': [],
+    'POST /api/v1/influencer/influencers': async (route) => { created = route.request().postDataJSON(); await route.fulfill({ status: 201, json: { id: 'influencer-library', status: 'draft', ...created } }); },
+  });
+  await page.goto('/influencer');
+  await page.getByLabel('Name').fill('Library Maya');
+  await page.getByLabel('Appearance').fill('Natural dark hair, warm complexion, athletic build');
+  await page.getByRole('button', { name: 'Influencer reference portrait-asset' }).click();
+  await page.getByText(/I confirm every depicted person/).click();
+  await page.getByRole('button', { name: 'Save draft' }).click();
+  expect(created).toMatchObject({ reference_storage_ids: ['portrait-storage'], reference_consent: true });
+});
+
 test('duplicates an influencer project as a clean editable variation', async ({ page }) => {
   let duplicated = false;
   const copy = { ...project, id: 'influencer-project-copy', title: 'Maya morning routine variation', scenesRevision: 1 };
