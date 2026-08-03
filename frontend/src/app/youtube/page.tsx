@@ -153,7 +153,7 @@ export default function YoutubePlannerPage() {
           <>
             <header className="glass-card youtube-production-header">
               <div>
-                <div className="youtube-eyebrow">{selected.strategy?.format || 'Production'} · {selected.strategy?.tone || 'Editorial plan'}</div>
+                <div className="youtube-eyebrow">{selected.strategy?.format || 'Production'} · {selected.strategy?.tone || 'Editorial plan'}{selected.strategy?.plannerEngine === 'gpt-4o-mini' ? ' · GPT-4o mini scenes' : selected.strategy?.plannerFallback ? ' · fallback scenes' : ''}</div>
                 <h1>{selected.topic}</h1>
                 <p>{selected.strategy?.positioning}</p>
               </div>

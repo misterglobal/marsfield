@@ -31,8 +31,184 @@ model User {
   freemiusEntitlements FreemiusEntitlement[]
   billingEvents        BillingEvent[]
   passwordResetTokens  PasswordResetToken[]
+  influencers          Influencer[]
+  influencerProducts   InfluencerProduct[]
+  influencerProjects   InfluencerVideoProject[]
 
   @@map("users")
+}
+
+model Influencer {
+  id                  String                  @id @default(uuid())
+  userId              String                  @map("user_id")
+  user                User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                String
+  profile             Json
+  canonicalDescription String?                @map("canonical_description")
+  voiceProfile        String?                 @map("voice_profile")
+  referenceStorageIds Json?                   @map("reference_storage_ids")
+  referenceConsentAt  DateTime?               @map("reference_consent_at")
+  status              String                  @default("draft")
+  primaryPredictionId String?                 @map("primary_prediction_id")
+  primaryAssetId      String?                 @map("primary_asset_id")
+  currentVersion      Int                     @default(0) @map("current_version")
+  versions            InfluencerVersion[]
+  projects            InfluencerVideoProject[]
+  createdAt           DateTime                @default(now()) @map("created_at")
+  updatedAt           DateTime                @updatedAt @map("updated_at")
+
+  @@index([userId, createdAt])
+  @@map("influencers")
+}
+
+model InfluencerVersion {
+  id                  String       @id @default(uuid())
+  influencerId        String       @map("influencer_id")
+  influencer          Influencer   @relation(fields: [influencerId], references: [id], onDelete: Cascade)
+  version             Int
+  profile             Json
+  canonicalDescription String      @map("canonical_description")
+  voiceProfile        String?      @map("voice_profile")
+  generationPrompt    String       @map("generation_prompt")
+  predictionId        String       @map("prediction_id")
+  assetId             String?      @map("asset_id")
+  imageUrl            String?      @map("image_url")
+  approvedAt          DateTime      @default(now()) @map("approved_at")
+  projects            InfluencerVideoProject[]
+
+  @@unique([influencerId, version])
+  @@index([predictionId])
+  @@map("influencer_versions")
+}
+
+model InfluencerProduct {
+  id                    String                   @id @default(uuid())
+  userId                String                   @map("user_id")
+  user                  User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                  String
+  description           String?
+  brandName             String?                  @map("brand_name")
+  approvedClaims        Json?                     @map("approved_claims")
+  restrictedClaims      Json?                     @map("restricted_claims")
+  brandColours          Json?                     @map("brand_colours")
+  referenceStorageIds   Json?                     @map("reference_storage_ids")
+  primaryStorageObjectId String?                  @map("primary_storage_object_id")
+  sourceUrl             String?                   @map("source_url")
+  sourceData            Json?                     @map("source_data")
+  externalImageUrls     Json?                     @map("external_image_urls")
+  projects              InfluencerVideoProject[]
+  createdAt             DateTime                  @default(now()) @map("created_at")
+  updatedAt             DateTime                  @updatedAt @map("updated_at")
+
+  @@index([userId, createdAt])
+  @@map("influencer_products")
+}
+
+model InfluencerVideoProject {
+  id                    String                   @id @default(uuid())
+  userId                String                   @map("user_id")
+  user                  User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  influencerId          String                   @map("influencer_id")
+  influencer            Influencer               @relation(fields: [influencerId], references: [id])
+  influencerVersionId   String                   @map("influencer_version_id")
+  influencerVersion     InfluencerVersion        @relation(fields: [influencerVersionId], references: [id])
+  productId             String?                  @map("product_id")
+  product               InfluencerProduct?       @relation(fields: [productId], references: [id])
+  title                 String
+  idea                  String
+  brief                 Json
+  durationSeconds       Int                      @map("duration_seconds")
+  aspectRatio           String                   @map("aspect_ratio")
+  status                String                   @default("draft")
+  scenesRevision        Int                      @default(0) @map("scenes_revision")
+  scenesApprovedAt      DateTime?                @map("scenes_approved_at")
+  scenes                InfluencerProjectScene[]
+  storyboards           InfluencerStoryboardVersion[]
+  videoGenerations      InfluencerVideoGeneration[]
+  createdAt             DateTime                 @default(now()) @map("created_at")
+  updatedAt             DateTime                 @updatedAt @map("updated_at")
+
+  @@index([userId, createdAt])
+  @@index([influencerId])
+  @@map("influencer_video_projects")
+}
+
+model InfluencerStoryboardVersion {
+  id                 String                  @id @default(uuid())
+  projectId          String                  @map("project_id")
+  project            InfluencerVideoProject  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  version            Int
+  scenesRevision     Int                     @map("scenes_revision")
+  sceneSnapshot      Json                    @map("scene_snapshot")
+  influencerSnapshot Json                    @map("influencer_snapshot")
+  productSnapshot    Json?                   @map("product_snapshot")
+  prompt             String
+  layout             String
+  visualStyle        String                  @map("visual_style")
+  referenceStorageIds Json?                  @map("reference_storage_ids")
+  predictionId       String                  @unique @map("prediction_id")
+  assetId            String?                 @map("asset_id")
+  imageUrl           String                  @map("image_url")
+  status             String                  @default("completed")
+  approved           Boolean                 @default(false)
+  approvedAt         DateTime?               @map("approved_at")
+  createdAt          DateTime                @default(now()) @map("created_at")
+  videoGenerations   InfluencerVideoGeneration[]
+
+  @@unique([projectId, version])
+  @@index([projectId, createdAt])
+  @@map("influencer_storyboard_versions")
+}
+
+model InfluencerVideoGeneration {
+  id                 String                       @id @default(uuid())
+  projectId          String                       @map("project_id")
+  project            InfluencerVideoProject       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  storyboardId       String                       @map("storyboard_id")
+  storyboard         InfluencerStoryboardVersion  @relation(fields: [storyboardId], references: [id])
+  attempt            Int
+  prompt             String
+  motionInstructions String?                      @map("motion_instructions")
+  settings           Json
+  predictionId       String                       @unique @map("prediction_id")
+  assetId            String?                      @map("asset_id")
+  videoUrl           String                       @map("video_url")
+  status             String                       @default("completed")
+  approved           Boolean                      @default(false)
+  approvedAt         DateTime?                    @map("approved_at")
+  creditsUsed        Int                          @default(0) @map("credits_used")
+  createdAt          DateTime                     @default(now()) @map("created_at")
+
+  @@unique([projectId, attempt])
+  @@index([storyboardId, createdAt])
+  @@map("influencer_video_generations")
+}
+
+model InfluencerProjectScene {
+  id                String                  @id @default(uuid())
+  projectId         String                  @map("project_id")
+  project           InfluencerVideoProject  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  index             Int
+  title             String
+  durationSeconds   Int                     @map("duration_seconds")
+  location          String
+  description       String
+  characterAction   String                  @map("character_action")
+  expression        String?
+  wardrobe          String
+  cameraFraming     String                  @map("camera_framing")
+  cameraMovement    String                  @map("camera_movement")
+  lighting          String?
+  productVisible    Boolean                 @default(false) @map("product_visible")
+  dialogue          String?
+  voiceover         String?
+  onScreenText      String?                 @map("on_screen_text")
+  transition        String?
+  createdAt         DateTime                @default(now()) @map("created_at")
+  updatedAt         DateTime                @updatedAt @map("updated_at")
+
+  @@unique([projectId, index])
+  @@map("influencer_project_scenes")
 }
 
 model PasswordResetToken {

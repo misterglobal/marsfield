@@ -970,3 +970,9 @@ body::after {
   .youtube-gates, .youtube-release-grid { grid-template-columns: 1fr; }.youtube-script-list article { grid-template-columns: 1fr; }
   .youtube-header-actions { align-items: stretch; }.youtube-delivery-action { align-items: stretch; flex-direction: column; }
 }
+
+@media (max-width: 900px) {
+  .influencer-split,
+  [style*="grid-template-columns: minmax(280px, 400px) 1fr"],
+  [style*="grid-template-columns: 320px 1fr"] { grid-template-columns: 1fr !important; }
+}

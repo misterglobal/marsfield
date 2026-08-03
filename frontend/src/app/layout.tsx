@@ -157,6 +157,7 @@ export default function RootLayout({
 
   const menuItems = [
     { name: "YouTube Planner", href: "/youtube", icon: "YT" },
+    { name: "AI Influencers", href: "/influencer", icon: "AI" },
     { name: "Video Studio", href: "/", icon: "🎬" },
     { name: "Projects", href: "/projects", icon: "🗂️" },
     { name: "Asset Library", href: "/library", icon: "📁" },
@@ -243,6 +244,7 @@ export default function RootLayout({
                 <h2 style={{ fontSize: "1.1rem", fontWeight: 600, fontFamily: "var(--font-display)" }}>
                   {pathname === "/" && "Studio Creative Workspace"}
                   {pathname === "/projects" && "Projects & Storyboards"}
+                  {pathname === "/influencer" && "AI Influencer Studio"}
                   {pathname === "/library" && "Asset Vault & Library"}
                   {pathname === "/kits" && "Characters & Brand Kits"}
                   {pathname === "/settings" && "Developer & Studio Settings"}

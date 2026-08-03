@@ -1,4 +1,4 @@
-export type BackendWorkflow = 'text-to-video' | 'image-to-video' | 'lip-sync' | 'text-to-image' | 'multimodal-video' | 'video-edit' | 'video-enhance' | 'image-upscale' | 'video-caption' | 'social-resize';
+export type BackendWorkflow = 'text-to-video' | 'image-to-video' | 'lip-sync' | 'text-to-image' | 'multimodal-video' | 'influencer-video' | 'video-edit' | 'video-enhance' | 'image-upscale' | 'video-caption' | 'social-resize';
 export type BackendModelFamily = 'general' | 'seedance' | 'nano-banana' | 'recraft' | 'grok-video' | 'kling-edit' | 'video-enhance' | 'image-upscale' | 'caption' | 'local-processing';
 
 export interface BackendModelDefinition {
@@ -44,5 +44,6 @@ export function modelSupportsWorkflow(modelId: string, workflow: string): boolea
   const definition = getModelDefinition(modelId);
   if (!definition) return false;
   if (workflow === 'character-replace') return modelId === 'kwaivgi/kling-v3-omni-video';
+  if (workflow === 'influencer-video') return modelId === 'kwaivgi/kling-v3-omni-video';
   return definition.workflow === workflow;
 }
