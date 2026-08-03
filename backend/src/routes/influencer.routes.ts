@@ -109,7 +109,7 @@ router.get('/products', authMiddleware, requireScope('projects:read'), async (re
   res.json(await prisma.influencerProduct.findMany({ where: { userId: req.user!.id }, orderBy: { updatedAt: 'desc' } }));
 });
 
-router.post('/products/scan-url', authMiddleware, requireScope('projects:write'), rateLimit('quote'), async (req: AuthenticatedRequest, res: Response) => {
+router.post('/products/scan-url', authMiddleware, requireScope('projects:write'), rateLimit('generation'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const url = text(req.body.url, 2000);
     if (!url) return void res.status(400).json({ error: 'Product URL is required' });
@@ -169,7 +169,7 @@ router.post('/projects/:id/duplicate', authMiddleware, requireScope('projects:wr
   } catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : 'Failed duplicating project' }); }
 });
 
-router.post('/projects/:id/plan', authMiddleware, requireScope('projects:write'), async (req: AuthenticatedRequest, res: Response) => {
+router.post('/projects/:id/plan', authMiddleware, requireScope('projects:write'), rateLimit('generation'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const project = await ownedProject(req.user!.id, req.params.id);
     if (!project) return void res.status(404).json({ error: 'Influencer project not found' });
@@ -250,7 +250,7 @@ router.post('/projects/:id/scenes/reorder', authMiddleware, requireScope('projec
   } catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : 'Failed reordering scenes' }); }
 });
 
-router.post('/projects/:id/scenes/:sceneId/rewrite', authMiddleware, requireScope('projects:write'), async (req: AuthenticatedRequest, res: Response) => {
+router.post('/projects/:id/scenes/:sceneId/rewrite', authMiddleware, requireScope('projects:write'), rateLimit('generation'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const project = await ownedProject(req.user!.id, req.params.id); const existing = project?.scenes.find((scene) => scene.id === req.params.sceneId);
     const instruction = text(req.body.instruction, 1000);

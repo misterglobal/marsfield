@@ -25,6 +25,29 @@ const redis = redisUrl
   : null;
 redis?.on('error', () => undefined);
 let warnedUnavailable = false;
+const localBuckets = new Map<string, { count: number; expiresAt: number }>();
+
+function consumeLocally(keys: string[]): { count: number; ttl: number } {
+  const now = Date.now();
+  const expiresAt = now + WINDOW_SECONDS * 1_000;
+  let maximum = 0;
+  let latestExpiry = expiresAt;
+  for (const key of keys) {
+    const current = localBuckets.get(key);
+    const bucket = !current || current.expiresAt <= now
+      ? { count: 1, expiresAt }
+      : { count: current.count + 1, expiresAt: current.expiresAt };
+    localBuckets.set(key, bucket);
+    maximum = Math.max(maximum, bucket.count);
+    latestExpiry = Math.max(latestExpiry, bucket.expiresAt);
+  }
+  if (localBuckets.size > 10_000) {
+    for (const [key, bucket] of localBuckets) {
+      if (bucket.expiresAt <= now) localBuckets.delete(key);
+    }
+  }
+  return { count: maximum, ttl: Math.max(1, Math.ceil((latestExpiry - now) / 1_000)) };
+}
 
 const CONSUME_SCRIPT = `
 local maximum = 0
@@ -44,19 +67,19 @@ function limitFor(plan: string | undefined, bucket: RateLimitBucket): number {
 }
 
 async function consume(keys: string[]): Promise<{ count: number; ttl: number } | null> {
-  if (!redis) return null;
+  if (!redis) return consumeLocally(keys);
   try {
     if (redis.status === 'wait') await redis.connect();
-    if (redis.status !== 'ready') return null;
+    if (redis.status !== 'ready') return consumeLocally(keys);
     const result = await redis.eval(CONSUME_SCRIPT, keys.length, ...keys, WINDOW_SECONDS) as [number, number];
     warnedUnavailable = false;
     return { count: Number(result[0]), ttl: Math.max(1, Number(result[1])) };
   } catch (error) {
     if (!warnedUnavailable) {
       warnedUnavailable = true;
-      console.warn('Rate limiting unavailable; allowing requests until Redis recovers:', error instanceof Error ? error.message : error);
+      console.warn('Redis rate limiting unavailable; using the per-process fallback until Redis recovers:', error instanceof Error ? error.message : error);
     }
-    return null;
+    return consumeLocally(keys);
   }
 }
 
@@ -116,7 +139,7 @@ export function publicRateLimit(
     res.setHeader('RateLimit-Reset', String(usage.ttl));
     if (usage.count > limit) {
       res.setHeader('Retry-After', String(usage.ttl));
-      res.status(429).json({ error: 'Too many recovery attempts. Please try again later.', retry_after_seconds: usage.ttl });
+      res.status(429).json({ error: 'Too many requests. Please try again later.', retry_after_seconds: usage.ttl });
       return;
     }
     next();

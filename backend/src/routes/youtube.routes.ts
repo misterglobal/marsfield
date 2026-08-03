@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { authMiddleware, AuthenticatedRequest, requireScope } from '../middleware/auth.middleware';
 import { planYoutubeProductionWithAI } from '../services/youtube-ai-planner.service';
 import { createYoutubeNarrationPackage } from '../services/youtube-narration.service';
+import { rateLimit } from '../middleware/rate-limit.middleware';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -49,7 +50,7 @@ router.get('/productions/:id', authMiddleware, requireScope('projects:read'), as
 });
 
 // POST /api/v1/youtube/productions
-router.post('/productions', authMiddleware, requireScope('projects:write'), async (req: AuthenticatedRequest, res: Response) => {
+router.post('/productions', authMiddleware, requireScope('projects:write'), rateLimit('generation'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user) return void res.status(401).json({ error: 'Unauthorized' });
     const topic = typeof req.body.topic === 'string' ? req.body.topic.trim() : '';

@@ -49,7 +49,7 @@ async function comparePassword(password: string, hash: string, userId: string): 
 }
 
 // POST /api/v1/auth/register
-router.post('/register', async (req, res) => {
+router.post('/register', publicRateLimit('register', 5, (req) => typeof req.body?.email === 'string' ? req.body.email : undefined), async (req, res) => {
   try {
     const { email, password, name } = req.body;
     
@@ -98,7 +98,7 @@ router.post('/register', async (req, res) => {
 });
 
 // POST /api/v1/auth/login
-router.post('/login', async (req, res) => {
+router.post('/login', publicRateLimit('login', 10, (req) => typeof req.body?.email === 'string' ? req.body.email : undefined), async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {

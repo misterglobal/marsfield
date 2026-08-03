@@ -116,7 +116,7 @@ router.post('/influencers/:id/approve', auth_middleware_1.authMiddleware, (0, au
 router.get('/products', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('projects:read'), async (req, res) => {
     res.json(await prisma.influencerProduct.findMany({ where: { userId: req.user.id }, orderBy: { updatedAt: 'desc' } }));
 });
-router.post('/products/scan-url', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('projects:write'), (0, rate_limit_middleware_1.rateLimit)('quote'), async (req, res) => {
+router.post('/products/scan-url', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('projects:write'), (0, rate_limit_middleware_1.rateLimit)('generation'), async (req, res) => {
     try {
         const url = text(req.body.url, 2000);
         if (!url)
@@ -195,7 +195,7 @@ router.post('/projects/:id/duplicate', auth_middleware_1.authMiddleware, (0, aut
         res.status(400).json({ error: error instanceof Error ? error.message : 'Failed duplicating project' });
     }
 });
-router.post('/projects/:id/plan', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('projects:write'), async (req, res) => {
+router.post('/projects/:id/plan', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('projects:write'), (0, rate_limit_middleware_1.rateLimit)('generation'), async (req, res) => {
     try {
         const project = await ownedProject(req.user.id, req.params.id);
         if (!project)
@@ -298,7 +298,7 @@ router.post('/projects/:id/scenes/reorder', auth_middleware_1.authMiddleware, (0
         res.status(400).json({ error: error instanceof Error ? error.message : 'Failed reordering scenes' });
     }
 });
-router.post('/projects/:id/scenes/:sceneId/rewrite', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('projects:write'), async (req, res) => {
+router.post('/projects/:id/scenes/:sceneId/rewrite', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('projects:write'), (0, rate_limit_middleware_1.rateLimit)('generation'), async (req, res) => {
     try {
         const project = await ownedProject(req.user.id, req.params.id);
         const existing = project?.scenes.find((scene) => scene.id === req.params.sceneId);

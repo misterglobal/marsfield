@@ -7,6 +7,46 @@ const asset_service_1 = require("../services/asset.service");
 const freemius_service_1 = require("../services/freemius.service");
 const router = (0, express_1.Router)();
 const prisma = new client_1.PrismaClient();
+const REPLICATE_WEBHOOK_TOLERANCE_SECONDS = 5 * 60;
+function header(value) {
+    return Array.isArray(value) ? value[0] : value;
+}
+function verifyReplicateWebhook(rawBody, headers) {
+    const configuredSecret = process.env.REPLICATE_WEBHOOK_SIGNING_SECRET?.trim();
+    if (!configuredSecret?.startsWith('whsec_'))
+        return false;
+    const webhookId = header(headers['webhook-id']);
+    const timestampValue = header(headers['webhook-timestamp']);
+    const signatureHeader = header(headers['webhook-signature']);
+    if (!webhookId || !timestampValue || !signatureHeader)
+        return false;
+    const timestamp = Number(timestampValue);
+    if (!Number.isInteger(timestamp) || Math.abs(Math.floor(Date.now() / 1_000) - timestamp) > REPLICATE_WEBHOOK_TOLERANCE_SECONDS)
+        return false;
+    let key;
+    try {
+        key = Buffer.from(configuredSecret.slice('whsec_'.length), 'base64');
+    }
+    catch {
+        return false;
+    }
+    if (key.length < 16)
+        return false;
+    const signedContent = `${webhookId}.${timestampValue}.${rawBody.toString('utf8')}`;
+    const expected = (0, crypto_1.createHmac)('sha256', key).update(signedContent).digest();
+    return signatureHeader.split(/\s+/).some((candidate) => {
+        const [version, encoded] = candidate.split(',', 2);
+        if (version !== 'v1' || !encoded)
+            return false;
+        try {
+            const provided = Buffer.from(encoded, 'base64');
+            return provided.length === expected.length && (0, crypto_1.timingSafeEqual)(provided, expected);
+        }
+        catch {
+            return false;
+        }
+    });
+}
 function getString(value) {
     if (value === undefined || value === null || value === '')
         return undefined;
@@ -30,7 +70,13 @@ function shouldResetCredits(type) {
 // POST /api/v1/webhooks/replicate
 router.post('/replicate', async (req, res) => {
     try {
-        const { id, status, output, error } = req.body;
+        const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.from(JSON.stringify(req.body || {}));
+        if (!verifyReplicateWebhook(rawBody, req.headers)) {
+            console.warn('Rejected Replicate webhook with missing or invalid signature');
+            res.status(401).send('Invalid signature');
+            return;
+        }
+        const { id, status, output, error } = JSON.parse(rawBody.toString('utf8'));
         if (!id || !status) {
             res.status(400).json({ error: 'Missing replicate event properties' });
             return;
@@ -42,7 +88,13 @@ router.post('/replicate', async (req, res) => {
             res.status(404).json({ error: 'Associated prediction not found in database' });
             return;
         }
-        const finalStatus = status === 'succeeded' ? 'succeeded' : status === 'failed' ? 'failed' : 'processing';
+        // Replicate retries deliveries and may deliver them out of order. Never let
+        // a late callback regress or replace an already-terminal prediction.
+        if (['succeeded', 'failed'].includes(prediction.status)) {
+            res.status(200).send('OK');
+            return;
+        }
+        const finalStatus = status === 'succeeded' ? 'succeeded' : ['failed', 'canceled'].includes(status) ? 'failed' : 'processing';
         const outputUrl = getOutputUrl(Array.isArray(output) ? output[0] : output);
         const updatedPrediction = await prisma.prediction.update({
             where: { id: prediction.id },

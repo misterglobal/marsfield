@@ -7,6 +7,7 @@ import {
   generateVideoPackagingIdeas,
   thumbnailCandidateTimes,
 } from '../services/video-packaging.service';
+import { rateLimit } from '../middleware/rate-limit.middleware';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -183,7 +184,7 @@ router.post('/:id/packaging/ideas', authMiddleware, requireScope('assets:read'),
 });
 
 // POST /api/v1/assets/:id/packaging/thumbnails
-router.post('/:id/packaging/thumbnails', authMiddleware, requireScope('assets:write'), async (req: AuthenticatedRequest, res: Response) => {
+router.post('/:id/packaging/thumbnails', authMiddleware, requireScope('assets:write'), rateLimit('generation'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user;
     if (!user) {
@@ -231,7 +232,7 @@ router.post('/:id/packaging/thumbnails', authMiddleware, requireScope('assets:wr
 });
 
 // POST /api/v1/assets/:id/packaging/title-overlay
-router.post('/:id/packaging/title-overlay', authMiddleware, requireScope('assets:write'), async (req: AuthenticatedRequest, res: Response) => {
+router.post('/:id/packaging/title-overlay', authMiddleware, requireScope('assets:write'), rateLimit('generation'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user;
     if (!user) {

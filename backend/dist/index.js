@@ -29,7 +29,7 @@ const corsOptions = {
     allowedHeaders: ['Content-Type', 'Authorization'],
 };
 app.use((0, cors_1.default)(corsOptions));
-app.use('/api/v1/webhooks/freemius', express_1.default.raw({ type: 'application/json', limit: '2mb' }));
+app.use(['/api/v1/webhooks/freemius', '/api/v1/webhooks/replicate'], express_1.default.raw({ type: 'application/json', limit: '2mb' }));
 app.use(express_1.default.json({ limit: '2mb' }));
 app.use(express_1.default.urlencoded({ limit: '2mb', extended: true }));
 // Routes Registration

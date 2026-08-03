@@ -37,6 +37,24 @@ function maximumBytes(kind: 'image' | 'video' | 'audio'): number {
   return kind === 'image' ? 10 * 1024 * 1024 : kind === 'audio' ? 50 * 1024 * 1024 : MAX_UPLOAD_BYTES;
 }
 
+async function reserveStorage(userId: string, byteSize: number): Promise<boolean> {
+  const updated = await prisma.$executeRaw`
+    UPDATE users
+    SET storage_usage_bytes = storage_usage_bytes + ${BigInt(byteSize)}
+    WHERE id = ${userId}
+      AND storage_usage_bytes + ${BigInt(byteSize)} <= storage_limit_bytes
+  `;
+  return updated === 1;
+}
+
+async function releaseStorage(userId: string, byteSize: number): Promise<void> {
+  await prisma.$executeRaw`
+    UPDATE users
+    SET storage_usage_bytes = GREATEST(0, storage_usage_bytes - ${BigInt(byteSize)})
+    WHERE id = ${userId}
+  `;
+}
+
 router.post('/presign', authMiddleware, requireScope('uploads:write'), rateLimit('upload'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -154,35 +172,35 @@ router.post('/complete', authMiddleware, requireScope('uploads:write'), async (r
       res.status(413).json({ error: `${kind} upload exceeds the ${maximumBytes(kind) / 1024 / 1024}MB limit` });
       return;
     }
-    const account = await prisma.user.findUnique({
-      where: { id: req.user.id },
-      select: { storageUsageBytes: true, storageLimitBytes: true },
-    });
-    if (!account || BigInt(account.storageUsageBytes) + BigInt(inspected.byteSize) > account.storageLimitBytes) {
+    if (!await reserveStorage(req.user.id, inspected.byteSize)) {
       res.status(403).json({ error: 'Storage quota exceeded. Delete the upload or upgrade your plan.' });
       return;
     }
-    const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const storageObject = await tx.storageObject.update({
-        where: { id: pending.id },
-        data: { mimeType: inspected.mimeType, byteSize: inspected.byteSize, checksum: null },
+    let result;
+    try {
+      result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        const claimed = await tx.storageObject.updateMany({
+          where: { id: pending.id, userId: req.user!.id, mimeType: null },
+          data: { mimeType: inspected.mimeType, byteSize: inspected.byteSize, checksum: null },
+        });
+        if (claimed.count !== 1) throw new Error('Upload was already completed');
+        const storageObject = await tx.storageObject.findUniqueOrThrow({ where: { id: pending.id } });
+        const asset = await tx.asset.create({
+          data: {
+            userId: req.user!.id,
+            storageObjectId: storageObject.id,
+            url: storageObject.url,
+            type: kind,
+            thumbnailUrl: kind === 'image' ? storageObject.url : null,
+            fileSize: inspected.byteSize,
+          },
+        });
+        return { storageObject, asset };
       });
-      const asset = await tx.asset.create({
-        data: {
-          userId: req.user!.id,
-          storageObjectId: storageObject.id,
-          url: storageObject.url,
-          type: kind,
-          thumbnailUrl: kind === 'image' ? storageObject.url : null,
-          fileSize: inspected.byteSize,
-        },
-      });
-      await tx.user.update({
-        where: { id: req.user!.id },
-        data: { storageUsageBytes: { increment: inspected.byteSize } },
-      });
-      return { storageObject, asset };
-    });
+    } catch (error) {
+      await releaseStorage(req.user.id, inspected.byteSize);
+      throw error;
+    }
     res.status(201).json({
       id: result.storageObject.id,
       asset_id: result.asset.id,
@@ -215,23 +233,33 @@ router.post('/', authMiddleware, requireScope('uploads:write'), rateLimit('uploa
       return;
     }
 
-    const objectId = randomUUID();
-    const stored = await storageService.storeBuffer({
-      buffer: req.file.buffer,
-      userId: req.user.id,
-      mimeType: req.file.mimetype,
-      assetType: kind,
-      namespace: 'uploads',
-      objectId,
-      originalName: req.file.originalname,
-      metadata: { source: 'marsfield-upload', purpose: String(req.body.purpose || 'generation-reference') },
-    });
-    if (!stored) {
-      res.status(503).json({ error: 'Durable storage is not configured' });
+    if (!await reserveStorage(req.user.id, req.file.size)) {
+      res.status(403).json({ error: 'Storage quota exceeded. Delete assets or upgrade your plan.' });
       return;
     }
 
-    const { storageObject, asset } = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const objectId = randomUUID();
+    let stored;
+    try {
+      stored = await storageService.storeBuffer({
+        buffer: req.file.buffer,
+        userId: req.user.id,
+        mimeType: req.file.mimetype,
+        assetType: kind,
+        namespace: 'uploads',
+        objectId,
+        originalName: req.file.originalname,
+        metadata: { source: 'marsfield-upload', purpose: String(req.body.purpose || 'generation-reference') },
+      });
+      if (!stored) throw new Error('Durable storage is not configured');
+    } catch (error) {
+      await releaseStorage(req.user.id, req.file.size);
+      throw error;
+    }
+
+    let storageObject; let asset;
+    try {
+      ({ storageObject, asset } = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const created = await tx.storageObject.create({
         data: {
           id: objectId,
@@ -245,10 +273,6 @@ router.post('/', authMiddleware, requireScope('uploads:write'), rateLimit('uploa
           checksum: stored.checksum,
         },
       });
-      await tx.user.update({
-        where: { id: req.user!.id },
-        data: { storageUsageBytes: { increment: stored.byteSize } },
-      });
       const asset = await tx.asset.create({
         data: {
           userId: req.user!.id,
@@ -260,7 +284,14 @@ router.post('/', authMiddleware, requireScope('uploads:write'), rateLimit('uploa
         },
       });
       return { storageObject: created, asset };
-    });
+      }));
+    } catch (error) {
+      await Promise.allSettled([
+        releaseStorage(req.user.id, req.file.size),
+        stored.key ? storageService.deleteObject(stored.key) : Promise.resolve(false),
+      ]);
+      throw error;
+    }
 
     res.status(201).json({
       id: storageObject.id,

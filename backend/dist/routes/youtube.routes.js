@@ -5,6 +5,7 @@ const client_1 = require("@prisma/client");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const youtube_ai_planner_service_1 = require("../services/youtube-ai-planner.service");
 const youtube_narration_service_1 = require("../services/youtube-narration.service");
+const rate_limit_middleware_1 = require("../middleware/rate-limit.middleware");
 const router = (0, express_1.Router)();
 const prisma = new client_1.PrismaClient();
 // GET /api/v1/youtube/productions
@@ -52,7 +53,7 @@ router.get('/productions/:id', auth_middleware_1.authMiddleware, (0, auth_middle
     }
 });
 // POST /api/v1/youtube/productions
-router.post('/productions', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('projects:write'), async (req, res) => {
+router.post('/productions', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('projects:write'), (0, rate_limit_middleware_1.rateLimit)('generation'), async (req, res) => {
     try {
         if (!req.user)
             return void res.status(401).json({ error: 'Unauthorized' });

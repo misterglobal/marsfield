@@ -4,6 +4,7 @@ import { authMiddleware, AuthenticatedRequest, requireScope } from '../middlewar
 import { planStoryboard } from '../services/storyboard-planner.service';
 import { queueService } from '../services/queue.service';
 import { normalizeTimelineClip } from '../services/timeline-export.service';
+import { rateLimit } from '../middleware/rate-limit.middleware';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -281,7 +282,7 @@ router.post('/:id/storyboard-plan', authMiddleware, requireScope('projects:write
 });
 
 // POST /api/v1/projects/:id/timeline-export
-router.post('/:id/timeline-export', authMiddleware, requireScope('projects:write'), async (req: AuthenticatedRequest, res: Response) => {
+router.post('/:id/timeline-export', authMiddleware, requireScope('projects:write'), rateLimit('generation'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user;
     if (!user) {
