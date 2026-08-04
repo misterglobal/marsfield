@@ -6,6 +6,7 @@ const auth_middleware_1 = require("../middleware/auth.middleware");
 const storyboard_planner_service_1 = require("../services/storyboard-planner.service");
 const queue_service_1 = require("../services/queue.service");
 const timeline_export_service_1 = require("../services/timeline-export.service");
+const rate_limit_middleware_1 = require("../middleware/rate-limit.middleware");
 const router = (0, express_1.Router)();
 const prisma = new client_1.PrismaClient();
 // GET /api/v1/projects
@@ -255,7 +256,7 @@ router.post('/:id/storyboard-plan', auth_middleware_1.authMiddleware, (0, auth_m
     }
 });
 // POST /api/v1/projects/:id/timeline-export
-router.post('/:id/timeline-export', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('projects:write'), async (req, res) => {
+router.post('/:id/timeline-export', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('projects:write'), (0, rate_limit_middleware_1.rateLimit)('generation'), async (req, res) => {
     try {
         const user = req.user;
         if (!user) {

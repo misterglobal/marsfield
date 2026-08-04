@@ -80,7 +80,7 @@ async function comparePassword(password, hash, userId) {
     return false;
 }
 // POST /api/v1/auth/register
-router.post('/register', async (req, res) => {
+router.post('/register', (0, rate_limit_middleware_1.publicRateLimit)('register', 5, (req) => typeof req.body?.email === 'string' ? req.body.email : undefined), async (req, res) => {
     try {
         const { email, password, name } = req.body;
         // Input validation
@@ -123,7 +123,7 @@ router.post('/register', async (req, res) => {
     }
 });
 // POST /api/v1/auth/login
-router.post('/login', async (req, res) => {
+router.post('/login', (0, rate_limit_middleware_1.publicRateLimit)('login', 10, (req) => typeof req.body?.email === 'string' ? req.body.email : undefined), async (req, res) => {
     try {
         const { email, password } = req.body;
         if (!email || !password) {

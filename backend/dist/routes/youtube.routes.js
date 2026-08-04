@@ -3,8 +3,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const client_1 = require("@prisma/client");
 const auth_middleware_1 = require("../middleware/auth.middleware");
-const youtube_planner_service_1 = require("../services/youtube-planner.service");
+const youtube_ai_planner_service_1 = require("../services/youtube-ai-planner.service");
 const youtube_narration_service_1 = require("../services/youtube-narration.service");
+const rate_limit_middleware_1 = require("../middleware/rate-limit.middleware");
 const router = (0, express_1.Router)();
 const prisma = new client_1.PrismaClient();
 // GET /api/v1/youtube/productions
@@ -52,7 +53,7 @@ router.get('/productions/:id', auth_middleware_1.authMiddleware, (0, auth_middle
     }
 });
 // POST /api/v1/youtube/productions
-router.post('/productions', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('projects:write'), async (req, res) => {
+router.post('/productions', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('projects:write'), (0, rate_limit_middleware_1.rateLimit)('generation'), async (req, res) => {
     try {
         if (!req.user)
             return void res.status(401).json({ error: 'Unauthorized' });
@@ -66,7 +67,7 @@ router.post('/productions', auth_middleware_1.authMiddleware, (0, auth_middlewar
         if (topic.length < 3 || topic.length > 180) {
             return void res.status(400).json({ error: 'Topic is required and must be under 180 characters' });
         }
-        const plan = (0, youtube_planner_service_1.planYoutubeProduction)({ topic, audience, targetDurationMin, angleCount, format, tone, objective });
+        const plan = await (0, youtube_ai_planner_service_1.planYoutubeProductionWithAI)({ topic, audience, targetDurationMin, angleCount, format, tone, objective });
         const production = await prisma.youtubeProduction.create({
             data: {
                 userId: req.user.id,
@@ -88,7 +89,7 @@ router.post('/productions', auth_middleware_1.authMiddleware, (0, auth_middlewar
                 userId: req.user.id,
                 eventType: 'youtube_planner_dry_run',
                 credits: 0,
-                metadata: { production_id: production.id, topic: plan.topic },
+                metadata: { production_id: production.id, topic: plan.topic, planner_engine: plan.strategy.plannerEngine },
             },
         });
         res.status(201).json({ ...production, credits_charged: 0 });

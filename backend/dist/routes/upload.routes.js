@@ -39,6 +39,22 @@ function mediaKind(mimeType) {
 function maximumBytes(kind) {
     return kind === 'image' ? 10 * 1024 * 1024 : kind === 'audio' ? 50 * 1024 * 1024 : MAX_UPLOAD_BYTES;
 }
+async function reserveStorage(userId, byteSize) {
+    const updated = await prisma.$executeRaw `
+    UPDATE users
+    SET storage_usage_bytes = storage_usage_bytes + ${BigInt(byteSize)}
+    WHERE id = ${userId}
+      AND storage_usage_bytes + ${BigInt(byteSize)} <= storage_limit_bytes
+  `;
+    return updated === 1;
+}
+async function releaseStorage(userId, byteSize) {
+    await prisma.$executeRaw `
+    UPDATE users
+    SET storage_usage_bytes = GREATEST(0, storage_usage_bytes - ${BigInt(byteSize)})
+    WHERE id = ${userId}
+  `;
+}
 router.post('/presign', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('uploads:write'), (0, rate_limit_middleware_1.rateLimit)('upload'), async (req, res) => {
     try {
         if (!req.user) {
@@ -155,35 +171,37 @@ router.post('/complete', auth_middleware_1.authMiddleware, (0, auth_middleware_1
             res.status(413).json({ error: `${kind} upload exceeds the ${maximumBytes(kind) / 1024 / 1024}MB limit` });
             return;
         }
-        const account = await prisma.user.findUnique({
-            where: { id: req.user.id },
-            select: { storageUsageBytes: true, storageLimitBytes: true },
-        });
-        if (!account || BigInt(account.storageUsageBytes) + BigInt(inspected.byteSize) > account.storageLimitBytes) {
+        if (!await reserveStorage(req.user.id, inspected.byteSize)) {
             res.status(403).json({ error: 'Storage quota exceeded. Delete the upload or upgrade your plan.' });
             return;
         }
-        const result = await prisma.$transaction(async (tx) => {
-            const storageObject = await tx.storageObject.update({
-                where: { id: pending.id },
-                data: { mimeType: inspected.mimeType, byteSize: inspected.byteSize, checksum: null },
+        let result;
+        try {
+            result = await prisma.$transaction(async (tx) => {
+                const claimed = await tx.storageObject.updateMany({
+                    where: { id: pending.id, userId: req.user.id, mimeType: null },
+                    data: { mimeType: inspected.mimeType, byteSize: inspected.byteSize, checksum: null },
+                });
+                if (claimed.count !== 1)
+                    throw new Error('Upload was already completed');
+                const storageObject = await tx.storageObject.findUniqueOrThrow({ where: { id: pending.id } });
+                const asset = await tx.asset.create({
+                    data: {
+                        userId: req.user.id,
+                        storageObjectId: storageObject.id,
+                        url: storageObject.url,
+                        type: kind,
+                        thumbnailUrl: kind === 'image' ? storageObject.url : null,
+                        fileSize: inspected.byteSize,
+                    },
+                });
+                return { storageObject, asset };
             });
-            const asset = await tx.asset.create({
-                data: {
-                    userId: req.user.id,
-                    storageObjectId: storageObject.id,
-                    url: storageObject.url,
-                    type: kind,
-                    thumbnailUrl: kind === 'image' ? storageObject.url : null,
-                    fileSize: inspected.byteSize,
-                },
-            });
-            await tx.user.update({
-                where: { id: req.user.id },
-                data: { storageUsageBytes: { increment: inspected.byteSize } },
-            });
-            return { storageObject, asset };
-        });
+        }
+        catch (error) {
+            await releaseStorage(req.user.id, inspected.byteSize);
+            throw error;
+        }
         res.status(201).json({
             id: result.storageObject.id,
             asset_id: result.asset.id,
@@ -214,51 +232,67 @@ router.post('/', auth_middleware_1.authMiddleware, (0, auth_middleware_1.require
             res.status(413).json({ error: `${kind} upload exceeds the ${kindLimit / 1024 / 1024}MB limit` });
             return;
         }
-        const objectId = (0, crypto_1.randomUUID)();
-        const stored = await storage_service_1.storageService.storeBuffer({
-            buffer: req.file.buffer,
-            userId: req.user.id,
-            mimeType: req.file.mimetype,
-            assetType: kind,
-            namespace: 'uploads',
-            objectId,
-            originalName: req.file.originalname,
-            metadata: { source: 'marsfield-upload', purpose: String(req.body.purpose || 'generation-reference') },
-        });
-        if (!stored) {
-            res.status(503).json({ error: 'Durable storage is not configured' });
+        if (!await reserveStorage(req.user.id, req.file.size)) {
+            res.status(403).json({ error: 'Storage quota exceeded. Delete assets or upgrade your plan.' });
             return;
         }
-        const { storageObject, asset } = await prisma.$transaction(async (tx) => {
-            const created = await tx.storageObject.create({
-                data: {
-                    id: objectId,
-                    userId: req.user.id,
-                    provider: stored.provider,
-                    bucket: stored.bucket,
-                    key: stored.key,
-                    url: stored.url,
-                    mimeType: stored.mimeType,
-                    byteSize: stored.byteSize,
-                    checksum: stored.checksum,
-                },
+        const objectId = (0, crypto_1.randomUUID)();
+        let stored;
+        try {
+            stored = await storage_service_1.storageService.storeBuffer({
+                buffer: req.file.buffer,
+                userId: req.user.id,
+                mimeType: req.file.mimetype,
+                assetType: kind,
+                namespace: 'uploads',
+                objectId,
+                originalName: req.file.originalname,
+                metadata: { source: 'marsfield-upload', purpose: String(req.body.purpose || 'generation-reference') },
             });
-            await tx.user.update({
-                where: { id: req.user.id },
-                data: { storageUsageBytes: { increment: stored.byteSize } },
-            });
-            const asset = await tx.asset.create({
-                data: {
-                    userId: req.user.id,
-                    storageObjectId: created.id,
-                    url: created.url,
-                    type: kind,
-                    thumbnailUrl: kind === 'image' ? created.url : null,
-                    fileSize: created.byteSize,
-                },
-            });
-            return { storageObject: created, asset };
-        });
+            if (!stored)
+                throw new Error('Durable storage is not configured');
+        }
+        catch (error) {
+            await releaseStorage(req.user.id, req.file.size);
+            throw error;
+        }
+        let storageObject;
+        let asset;
+        try {
+            ({ storageObject, asset } = await prisma.$transaction(async (tx) => {
+                const created = await tx.storageObject.create({
+                    data: {
+                        id: objectId,
+                        userId: req.user.id,
+                        provider: stored.provider,
+                        bucket: stored.bucket,
+                        key: stored.key,
+                        url: stored.url,
+                        mimeType: stored.mimeType,
+                        byteSize: stored.byteSize,
+                        checksum: stored.checksum,
+                    },
+                });
+                const asset = await tx.asset.create({
+                    data: {
+                        userId: req.user.id,
+                        storageObjectId: created.id,
+                        url: created.url,
+                        type: kind,
+                        thumbnailUrl: kind === 'image' ? created.url : null,
+                        fileSize: created.byteSize,
+                    },
+                });
+                return { storageObject: created, asset };
+            }));
+        }
+        catch (error) {
+            await Promise.allSettled([
+                releaseStorage(req.user.id, req.file.size),
+                stored.key ? storage_service_1.storageService.deleteObject(stored.key) : Promise.resolve(false),
+            ]);
+            throw error;
+        }
         res.status(201).json({
             id: storageObject.id,
             asset_id: asset.id,

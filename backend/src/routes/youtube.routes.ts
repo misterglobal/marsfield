@@ -1,8 +1,9 @@
 import { Router, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { authMiddleware, AuthenticatedRequest, requireScope } from '../middleware/auth.middleware';
-import { planYoutubeProduction } from '../services/youtube-planner.service';
+import { planYoutubeProductionWithAI } from '../services/youtube-ai-planner.service';
 import { createYoutubeNarrationPackage } from '../services/youtube-narration.service';
+import { rateLimit } from '../middleware/rate-limit.middleware';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -49,7 +50,7 @@ router.get('/productions/:id', authMiddleware, requireScope('projects:read'), as
 });
 
 // POST /api/v1/youtube/productions
-router.post('/productions', authMiddleware, requireScope('projects:write'), async (req: AuthenticatedRequest, res: Response) => {
+router.post('/productions', authMiddleware, requireScope('projects:write'), rateLimit('generation'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.user) return void res.status(401).json({ error: 'Unauthorized' });
     const topic = typeof req.body.topic === 'string' ? req.body.topic.trim() : '';
@@ -63,7 +64,7 @@ router.post('/productions', authMiddleware, requireScope('projects:write'), asyn
       return void res.status(400).json({ error: 'Topic is required and must be under 180 characters' });
     }
 
-    const plan = planYoutubeProduction({ topic, audience, targetDurationMin, angleCount, format, tone, objective });
+    const plan = await planYoutubeProductionWithAI({ topic, audience, targetDurationMin, angleCount, format, tone, objective });
     const production = await prisma.youtubeProduction.create({
       data: {
         userId: req.user.id,
@@ -86,7 +87,7 @@ router.post('/productions', authMiddleware, requireScope('projects:write'), asyn
         userId: req.user.id,
         eventType: 'youtube_planner_dry_run',
         credits: 0,
-        metadata: { production_id: production.id, topic: plan.topic },
+        metadata: { production_id: production.id, topic: plan.topic, planner_engine: plan.strategy.plannerEngine },
       },
     });
 

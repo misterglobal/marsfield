@@ -188,7 +188,7 @@ router.post('/generate', authMiddleware, requireScope('generation:write'), rateL
     }
 
     // Validate workflow
-    const validWorkflows = ['text-to-video', 'image-to-video', 'lip-sync', 'text-to-image', 'multi-image-video', 'multimodal-video', 'character-replace', 'video-edit', 'video-enhance', 'image-upscale', 'video-caption', 'social-resize'];
+    const validWorkflows = ['text-to-video', 'image-to-video', 'lip-sync', 'text-to-image', 'multi-image-video', 'multimodal-video', 'influencer-video', 'character-replace', 'video-edit', 'video-enhance', 'image-upscale', 'video-caption', 'social-resize'];
     if (!validWorkflows.includes(workflow)) {
        res.status(400).json({ error: 'Invalid workflow type' });
        return;
@@ -264,6 +264,26 @@ router.post('/generate', authMiddleware, requireScope('generation:write'), rateL
           reference_audio: referenceAudio,
           first_frame_image: firstFrameImage,
           last_frame_image: lastFrameImage,
+        };
+      } else if (workflow === 'influencer-video') {
+        if (model !== 'kwaivgi/kling-v3-omni-video') throw new Error('Influencer video generation requires Kling V3 Omni Video');
+        const duration = Number(params?.duration ?? 5);
+        if (!Number.isInteger(duration) || duration < 3 || duration > 15) throw new Error('Kling duration must be an integer from 3 to 15 seconds');
+        const mode = params?.mode || 'standard';
+        if (!['standard', 'pro'].includes(mode)) throw new Error('Kling mode must be standard or pro');
+        const aspectRatio = params?.aspect_ratio || '9:16';
+        if (!['16:9', '9:16', '1:1'].includes(aspectRatio)) throw new Error('Invalid Kling aspect ratio');
+        const referenceImages = await resolveOwnedStorageObjects(user.id, params?.reference_image_ids || [], 7, 'image/', 'Influencer video references') || [];
+        if (!referenceImages.length) throw new Error('Influencer video generation requires at least one reference image');
+        const multiPrompt = typeof params?.multi_prompt === 'string' ? params.multi_prompt : undefined;
+        if (multiPrompt && multiPrompt.length > 12000) throw new Error('Kling multi-shot prompt is too long');
+        billingParams.duration = duration;
+        billingParams.mode = mode;
+        predictionInput = {
+          prompt: prompt.trim(), duration, mode, aspect_ratio: aspectRatio,
+          generate_audio: params?.generate_audio !== false,
+          reference_images: referenceImages,
+          multi_prompt: multiPrompt,
         };
       } else if (workflow === 'character-replace' || workflow === 'video-edit') {
         if (model !== 'kwaivgi/kling-v3-omni-video') {

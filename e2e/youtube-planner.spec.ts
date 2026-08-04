@@ -54,23 +54,25 @@ test('creates a YouTube dry-run plan and converts it to a storyboard project', a
   });
 
   await page.goto('/youtube');
-  await page.getByPlaceholder('Topic, e.g. The Sogdians and the Silk Road').fill('The Sogdians and the Silk Road');
-  await page.getByLabel('Target minutes').fill('8');
-  await page.getByLabel('Research angles').fill('8');
-  await page.getByRole('button', { name: 'Create dry-run plan' }).click();
+  await page.getByLabel('Story or working title').fill('The Sogdians and the Silk Road');
+  await page.getByLabel('Runtime').fill('8');
+  await page.getByLabel('Research lanes').fill('8');
+  await page.getByRole('button', { name: 'Build production plan' }).click();
 
   await expect(page.getByText('A cinematic history explainer.')).toBeVisible();
-  await expect(page.getByText('The Hidden Story of the Sogdians')).toBeVisible();
+  await page.getByRole('button', { name: /03 Storyboard/ }).click();
   await expect(page.getByText('Ancient traders cross the desert.')).toBeVisible();
   expect(createPayload).toMatchObject({ topic: 'The Sogdians and the Silk Road', target_duration_min: 8, angle_count: 8 });
 
-  await page.getByLabel('Narration words per minute').fill('150');
-  await page.getByRole('button', { name: 'Prepare narration package' }).click();
-  await expect(page.getByText('1200 words')).toBeVisible();
-  await expect(page.getByText('1 caption cues')).toBeVisible();
-  await expect(page.getByLabel('TTS narration text')).toHaveValue('There is a hidden story.');
+  await page.getByRole('button', { name: /04 Delivery/ }).click();
+  await expect(page.getByText('The Hidden Story of the Sogdians')).toBeVisible();
+  await page.getByLabel('Read speed (WPM)').fill('150');
+  await page.getByRole('button', { name: 'Prepare timing package' }).click();
+  await expect(page.getByText('1200', { exact: true })).toBeVisible();
+  await expect(page.locator('.youtube-panel-stack .youtube-metrics strong').nth(2)).toHaveText('1');
+  await expect(page.locator('textarea[readonly]')).toHaveValue('There is a hidden story.');
   expect(narrationPayload).toMatchObject({ words_per_minute: 150 });
 
-  await page.getByRole('button', { name: 'Create storyboard project' }).click();
-  await expect(page.getByRole('link', { name: 'Open Projects' })).toBeVisible();
+  await page.getByRole('button', { name: 'Send to edit project' }).click();
+  await expect(page.getByRole('link', { name: 'Open edit project' })).toBeVisible();
 });

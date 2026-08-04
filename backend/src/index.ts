@@ -12,6 +12,7 @@ import uploadRouter from './routes/upload.routes';
 import kitRouter from './routes/kit.routes';
 import youtubeRouter from './routes/youtube.routes';
 import feedbackRouter from './routes/feedback.routes';
+import influencerRouter from './routes/influencer.routes';
 import { queueService } from './services/queue.service';
 import { startRetentionScheduler } from './services/retention.service';
 
@@ -22,12 +23,12 @@ const PORT = process.env.PORT || 3001;
 const corsOptions = {
   origin: process.env.FRONTEND_URL || 'http://localhost:3000',
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 };
 
 app.use(cors(corsOptions));
-app.use('/api/v1/webhooks/freemius', express.raw({ type: 'application/json', limit: '2mb' }));
+app.use(['/api/v1/webhooks/freemius', '/api/v1/webhooks/replicate'], express.raw({ type: 'application/json', limit: '2mb' }));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ limit: '2mb', extended: true }));
 
@@ -40,6 +41,7 @@ app.use('/api/v1/uploads', uploadRouter);
 app.use('/api/v1/kits', kitRouter);
 app.use('/api/v1/youtube', youtubeRouter);
 app.use('/api/v1/feedback', feedbackRouter);
+app.use('/api/v1/influencer', influencerRouter);
 app.use('/api/v1', generateRouter);
 app.use('/api/v1/webhooks', webhookRouter);
 

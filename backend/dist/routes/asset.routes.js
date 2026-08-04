@@ -6,6 +6,7 @@ const auth_middleware_1 = require("../middleware/auth.middleware");
 const storage_service_1 = require("../services/storage.service");
 const queue_service_1 = require("../services/queue.service");
 const video_packaging_service_1 = require("../services/video-packaging.service");
+const rate_limit_middleware_1 = require("../middleware/rate-limit.middleware");
 const router = (0, express_1.Router)();
 const prisma = new client_1.PrismaClient();
 function isAssetDeleteEnabledForUser(email) {
@@ -165,7 +166,7 @@ router.post('/:id/packaging/ideas', auth_middleware_1.authMiddleware, (0, auth_m
     }
 });
 // POST /api/v1/assets/:id/packaging/thumbnails
-router.post('/:id/packaging/thumbnails', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('assets:write'), async (req, res) => {
+router.post('/:id/packaging/thumbnails', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('assets:write'), (0, rate_limit_middleware_1.rateLimit)('generation'), async (req, res) => {
     try {
         const user = req.user;
         if (!user) {
@@ -209,7 +210,7 @@ router.post('/:id/packaging/thumbnails', auth_middleware_1.authMiddleware, (0, a
     }
 });
 // POST /api/v1/assets/:id/packaging/title-overlay
-router.post('/:id/packaging/title-overlay', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('assets:write'), async (req, res) => {
+router.post('/:id/packaging/title-overlay', auth_middleware_1.authMiddleware, (0, auth_middleware_1.requireScope)('assets:write'), (0, rate_limit_middleware_1.rateLimit)('generation'), async (req, res) => {
     try {
         const user = req.user;
         if (!user) {

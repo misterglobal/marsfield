@@ -29,6 +29,11 @@ function parseVariationCount(params?: Record<string, unknown>): number {
 
 function getBaseCredits(input: GenerationBillingInput): number {
   if (input.workflow === 'social-resize') return 0;
+  if (input.workflow === 'influencer-video') {
+    const duration = Number(input.params?.duration ?? 15);
+    if (!Number.isFinite(duration) || duration < 3 || duration > 15) throw new Error('Influencer video duration must be between 3 and 15 seconds');
+    return Math.ceil(duration * 50 / 15);
+  }
   if (input.workflow === 'video-caption') return 4;
   if (input.workflow === 'image-upscale') {
     if (input.model === 'google/upscaler') return 1;

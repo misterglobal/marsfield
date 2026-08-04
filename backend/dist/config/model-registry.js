@@ -40,5 +40,7 @@ function modelSupportsWorkflow(modelId, workflow) {
         return false;
     if (workflow === 'character-replace')
         return modelId === 'kwaivgi/kling-v3-omni-video';
+    if (workflow === 'influencer-video')
+        return modelId === 'kwaivgi/kling-v3-omni-video';
     return definition.workflow === workflow;
 }

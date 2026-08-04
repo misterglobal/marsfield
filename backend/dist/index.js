@@ -16,6 +16,7 @@ const upload_routes_1 = __importDefault(require("./routes/upload.routes"));
 const kit_routes_1 = __importDefault(require("./routes/kit.routes"));
 const youtube_routes_1 = __importDefault(require("./routes/youtube.routes"));
 const feedback_routes_1 = __importDefault(require("./routes/feedback.routes"));
+const influencer_routes_1 = __importDefault(require("./routes/influencer.routes"));
 const queue_service_1 = require("./services/queue.service");
 const retention_service_1 = require("./services/retention.service");
 const app = (0, express_1.default)();
@@ -24,11 +25,11 @@ const PORT = process.env.PORT || 3001;
 const corsOptions = {
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization'],
 };
 app.use((0, cors_1.default)(corsOptions));
-app.use('/api/v1/webhooks/freemius', express_1.default.raw({ type: 'application/json', limit: '2mb' }));
+app.use(['/api/v1/webhooks/freemius', '/api/v1/webhooks/replicate'], express_1.default.raw({ type: 'application/json', limit: '2mb' }));
 app.use(express_1.default.json({ limit: '2mb' }));
 app.use(express_1.default.urlencoded({ limit: '2mb', extended: true }));
 // Routes Registration
@@ -40,6 +41,7 @@ app.use('/api/v1/uploads', upload_routes_1.default);
 app.use('/api/v1/kits', kit_routes_1.default);
 app.use('/api/v1/youtube', youtube_routes_1.default);
 app.use('/api/v1/feedback', feedback_routes_1.default);
+app.use('/api/v1/influencer', influencer_routes_1.default);
 app.use('/api/v1', generate_routes_1.default);
 app.use('/api/v1/webhooks', webhook_routes_1.default);
 // Health check endpoint
