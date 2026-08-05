@@ -1,3 +1,5 @@
+import { normalizeYoutubeIdea, NormalizedYoutubeTopic } from './youtube-topic-normalizer.service';
+
 export interface YoutubePlannerInput {
   topic: string;
   audience?: string;
@@ -117,8 +119,47 @@ function clean(value: unknown, fallback = '', max = 180): string {
   return String(value || fallback).replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
-function keywordsFor(topic: string): string[] {
-  return topic.toLowerCase().replace(/[^\w\s-]/g, '').split(/\s+/).filter(Boolean).slice(0, 8);
+function researchQuestionsFor(normalized: NormalizedYoutubeTopic, angle: string): string[] {
+  const subject = normalized.people[0] || normalized.organizations[0] || normalized.concepts[0] || normalized.topic.replace(/^The\s+/i, '');
+  const counterpart = normalized.concepts.find((concept) => concept !== subject) || normalized.entities.find((entity) => entity !== subject) || 'the wider system';
+  const questions: Record<string, string[]> = {
+    Origin: [
+      `What did ${subject} actually introduce, and which parts of the popular origin story are exaggerated?`,
+      `Which primary sources establish when and why ${normalized.topic.toLowerCase()} began?`,
+    ],
+    System: [
+      `Which institutions, incentives, and processes connected ${subject} to ${counterpart}?`,
+      `Who funded, controlled, and benefited from that system at each stage?`,
+    ],
+    People: [
+      `Whose decisions shaped ${normalized.topic.toLowerCase()}, and whose experience is missing from the familiar account?`,
+      `Which firsthand records reveal the human stakes behind the central tension?`,
+    ],
+    'Turning point': [
+      `Which decision or discovery changed the direction of this story, and what alternatives still existed?`,
+      `What evidence shows that the turning point was recognized at the time rather than only in hindsight?`,
+    ],
+    Consequence: [
+      `What measurable harms and benefits followed, and how were they distributed?`,
+      `Which consequence most directly explains why this history still matters now?`,
+    ],
+    Misconception: [
+      `Which claim about ${subject} is repeated most often without adequate evidence?`,
+      `What is the strongest credible evidence for and against that claim?`,
+    ],
+    Legacy: [
+      `Where can the influence of ${normalized.topic.toLowerCase()} still be observed today?`,
+      `How did later institutions reinterpret or repurpose the original work?`,
+    ],
+    'Unanswered question': [
+      `Which part of the central tension remains unresolved after the strongest available evidence is considered?`,
+      `Which missing archive, experiment, or testimony would most change the conclusion?`,
+    ],
+  };
+  return questions[angle] || [
+    `What topic-specific evidence is needed to understand ${angle.toLowerCase()} in this story?`,
+    `Which source would most strongly challenge the current interpretation?`,
+  ];
 }
 
 function timecode(seconds: number): string {
@@ -127,8 +168,11 @@ function timecode(seconds: number): string {
 }
 
 export function planYoutubeProduction(input: YoutubePlannerInput) {
-  const topic = clean(input.topic);
-  if (topic.length < 3) throw new Error('Topic must be at least 3 characters');
+  const normalizedTopic = normalizeYoutubeIdea(input.topic, input.objective);
+  const { rawIdea: _rawIdea, ...structuredTopic } = normalizedTopic;
+  const topic = normalizedTopic.topic;
+  const title = normalizedTopic.title;
+  if (title.length < 3) throw new Error('Topic must be at least 3 characters');
   const audience = clean(input.audience, 'curious viewers who value clear, evidence-led storytelling', 140);
   const targetDurationMin = clampInt(input.targetDurationMin, 8, 3, 60);
   const angleCount = clampInt(input.angleCount, 8, 4, 12);
@@ -141,25 +185,22 @@ export function planYoutubeProduction(input: YoutubePlannerInput) {
 
   const research = {
     topic,
+    normalizedTopic: structuredTopic,
     status: 'needs_sources',
     disclaimer: 'Editorial research brief—not verified reporting. Clear every claim against primary or reputable secondary sources before recording.',
     sourceStandards: ['Prefer primary sources for central claims', 'Triangulate contested claims with two independent sources', 'Label uncertainty in the narration', 'Record URLs, author, publication, date, and access date'],
     angles: selectedAngles.map((item, index) => ({
       ...item,
-      questions: [
-        `What is the most defensible claim about ${topic} through ${item.angle.toLowerCase()}?`,
-        `What would a sceptical viewer challenge, and which source answers them?`,
-        `Which concrete image can prove the point without the voice-over?`,
-      ],
+      questions: researchQuestionsFor(normalizedTopic, item.angle),
       factPrompts: [
-        { id: `${index + 1}.1`, prompt: `Find the strongest primary or expert source for ${item.proof}.`, status: 'open' },
-        { id: `${index + 1}.2`, prompt: `Find a credible source that complicates or contradicts the main claim.`, status: 'open' },
+        { id: `${index + 1}.1`, prompt: `Locate a primary or expert source that documents ${item.proof} for this specific story.`, status: 'open' },
+        { id: `${index + 1}.2`, prompt: `Locate a credible source that tests the claim: ${normalizedTopic.centralTension}`, status: 'open' },
       ],
     })),
   };
 
   const chapterBlueprints = [
-    { name: 'Cold open', purpose: 'Create a specific contradiction and withhold its explanation', beat: `Begin on one concrete image connected to ${topic}. State what it appears to mean, then reveal why that reading is incomplete.`, retention: 'Open a question the film can answer only after the turning point.' },
+    { name: 'Cold open', purpose: 'Create a specific contradiction and withhold its explanation', beat: normalizedTopic.hook, retention: `Open the question: ${normalizedTopic.centralTension}` },
     { name: 'The promise', purpose: 'Define the viewer contract', beat: `Tell ${audience} exactly what they will understand by the end, without summarising the answer.`, retention: 'Preview three escalating discoveries in one sentence.' },
     ...selectedAngles.slice(0, Math.min(7, Math.max(3, targetDurationMin - 2))).map((item, index) => ({
       name: `${index + 1}. ${item.angle}`,
@@ -198,7 +239,8 @@ export function planYoutubeProduction(input: YoutubePlannerInput) {
 
   const productionBible = {
     version: 2,
-    thematicSpine: `Follow how the strongest visible evidence changes the viewer's understanding of ${topic}.`,
+    normalizedTopic: structuredTopic,
+    thematicSpine: `Follow how the strongest visible evidence resolves this tension: ${normalizedTopic.centralTension}`,
     visualStyle: {
       format,
       tone,
@@ -346,20 +388,20 @@ export function planYoutubeProduction(input: YoutubePlannerInput) {
   });
   const continuityReport = validateStoryboardContinuity(storyboard);
 
-  const words = keywordsFor(topic);
   const strategy = {
+    normalizedTopic: structuredTopic,
     targetAudience: audience,
     format,
     tone,
     objective,
     contentType: targetDurationMin >= 8 ? 'chaptered long-form video' : 'focused short-form explainer',
-    positioning: `${format} about ${topic}, shaped for ${audience}. ${objective}.`,
+    positioning: `${format} about ${topic}, shaped for ${audience}. ${normalizedTopic.viewerTakeaway}`,
     productionBible,
     sequences,
     continuityReport,
-    centralQuestion: `What do we misunderstand about ${topic}, and what changes when we follow the strongest evidence?`,
-    viewerPromise: `By the end, the viewer can explain the central tension in ${topic}, point to the evidence, and understand why it matters.`,
-    keywords: Array.from(new Set([...words, 'explained', 'documentary', 'analysis'])).slice(0, 12),
+    centralQuestion: normalizedTopic.centralTension,
+    viewerPromise: normalizedTopic.viewerTakeaway,
+    keywords: normalizedTopic.searchKeywords,
     reviewGates: [
       { stage: 'Research lock', criteria: 'Every central claim has a source and uncertainty is labelled.' },
       { stage: 'Script lock', criteria: `Narration lands near ${targetWords} words, reads naturally aloud, and each chapter changes the viewer’s understanding.` },
@@ -369,16 +411,16 @@ export function planYoutubeProduction(input: YoutubePlannerInput) {
   };
 
   const seo = {
-    titles: [`The ${topic} Story We Keep Getting Wrong`, `${topic}: What the Evidence Actually Shows`, `Why ${topic} Still Changes the Way We See the World`, `Inside ${topic}: The Detail That Reframes Everything`],
+    titles: [title, `${title}: What the Evidence Actually Shows`, `The Hidden Cost Behind ${title}`, `What ${title} Changes About the Story`],
     description: `${strategy.viewerPromise}\n\nThis production is built from an evidence-led editorial brief. Sources and corrections should be included in the final description.`,
-    tags: Array.from(new Set([...words, 'video essay', 'documentary', 'explained', 'analysis'])).slice(0, 15),
+    tags: normalizedTopic.searchKeywords,
   };
 
   return {
-    topic, audience, targetDurationMin, research, strategy,
+    topic: title, audience, targetDurationMin, normalizedTopic: structuredTopic, research, strategy,
     script: {
       status: 'outline',
-      hook: scriptSections[0].narration,
+      hook: normalizedTopic.hook,
       targetWords,
       estimatedReadMinutes: targetDurationMin,
       sections: scriptSections,
@@ -397,7 +439,19 @@ export function planYoutubeProduction(input: YoutubePlannerInput) {
       scenes: sceneCount,
       averageShotSeconds: Number((totalSeconds / sceneCount).toFixed(1)),
       openResearchTasks: selectedAngles.length * 2,
-      readiness: 25,
+      readiness: 30,
+      readinessCriteria: [
+        { id: 'creative_direction', label: 'Creative direction', complete: true },
+        { id: 'runtime_target', label: 'Runtime target', complete: true },
+        { id: 'editorial_angle', label: 'Editorial angle', complete: true },
+        { id: 'source_verification', label: 'Source verification', complete: false },
+        { id: 'script_approval', label: 'Script approval', complete: false },
+        { id: 'storyboard_approval', label: 'Storyboard approval', complete: false },
+        { id: 'audio_generation', label: 'Audio generation', complete: false },
+        { id: 'delivery_review', label: 'Delivery review', complete: false },
+        { id: 'rights_clearance', label: 'Rights clearance', complete: false },
+        { id: 'publish_package', label: 'Publish package', complete: false },
+      ],
     },
     estimatedCreditsMin: Math.max(200, sceneCount * 14),
   };

@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "nodemon src/index.ts",
     "build": "tsc",
+    "test:youtube": "npm run build && node --test test/youtube-planner.test.js",
     "start": "node dist/index.js",
     "start:docker": "prisma db push --skip-generate && node dist/index.js",
     "prisma:generate": "prisma generate",

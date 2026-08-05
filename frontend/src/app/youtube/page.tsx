@@ -8,7 +8,7 @@ type StudioTab = 'brief' | 'script' | 'storyboard' | 'delivery';
 interface ProductionSummary { id: string; topic: string; targetDurationMin: number; status: string; estimatedCreditsMin: number; projectId: string | null; updatedAt: string }
 interface Production extends ProductionSummary {
   audience: string | null; research: any; strategy: any; script: any; storyboard: any[];
-  narration?: any; captions?: any; audio?: any; seo: any; thumbnailConcepts: any[]; productionMetrics?: any;
+  normalizedTopic?: any; narration?: any; captions?: any; audio?: any; seo: any; thumbnailConcepts: any[]; productionMetrics?: any;
 }
 
 const tabs: { id: StudioTab; label: string; kicker: string }[] = [
@@ -106,7 +106,7 @@ export default function YoutubePlannerPage() {
           <h2>Creative brief</h2>
           <p className="youtube-muted">Set the editorial direction before the studio builds the plan.</p>
           <label className="form-label">Story or working title
-            <textarea className="form-textarea" rows={3} placeholder="What is the film about?" value={topic} onChange={(e) => setTopic(e.target.value)} maxLength={180} />
+            <textarea className="form-textarea" rows={5} placeholder="Paste a title, hook, or full story idea. Marsfield will structure it before planning." value={topic} onChange={(e) => setTopic(e.target.value)} maxLength={4000} />
           </label>
           <label className="form-label">Viewer
             <input className="form-input" value={audience} onChange={(e) => setAudience(e.target.value)} maxLength={140} />
@@ -153,12 +153,12 @@ export default function YoutubePlannerPage() {
           <>
             <header className="glass-card youtube-production-header">
               <div>
-                <div className="youtube-eyebrow">{selected.strategy?.format || 'Production'} · {selected.strategy?.tone || 'Editorial plan'}{selected.strategy?.plannerEngine === 'gpt-4o-mini' ? ' · GPT-4o mini scenes' : selected.strategy?.plannerFallback ? ' · fallback scenes' : ''}</div>
+                <div className="youtube-eyebrow">{selected.strategy?.format || 'Production'} · {selected.strategy?.tone || 'Editorial plan'}{selected.strategy?.plannerEngine === 'gpt-4o-mini' ? ' · Enhanced scene plan' : selected.strategy?.plannerFallback ? ' · Draft scene plan' : ''}</div>
                 <h1>{selected.topic}</h1>
                 <p>{selected.strategy?.positioning}</p>
               </div>
               <div className="youtube-header-actions">
-                <span className="youtube-readiness"><strong>{selected.productionMetrics?.readiness || 25}%</strong> pre-production ready</span>
+                <ReadinessBadge production={selected} />
                 {selected.projectId
                   ? <a className="btn btn-secondary" href="/projects">Open edit project</a>
                   : <button className="btn btn-primary" onClick={() => void createProject()} disabled={projectCreating}>{projectCreating ? 'Creating…' : 'Send to edit project'}</button>}
@@ -167,8 +167,9 @@ export default function YoutubePlannerPage() {
                 <span><strong>{selected.script?.targetWords || '—'}</strong> target words</span>
                 <span><strong>{selected.storyboard?.length || 0}</strong> planned shots</span>
                 <span><strong>{formatSeconds(totalStoryboardSeconds)}</strong> picture runtime</span>
-                <span><strong>{selected.productionMetrics?.openResearchTasks || '—'}</strong> open research tasks</span>
+                <span><strong>{selected.productionMetrics?.openResearchTasks ?? 'Not generated'}</strong> {selected.productionMetrics?.openResearchTasks == null ? 'research tasks' : 'open research tasks'}</span>
               </div>
+              <ReadinessChecklist production={selected} />
             </header>
 
             <nav className="youtube-tabs" aria-label="Production stages">
@@ -186,8 +187,41 @@ export default function YoutubePlannerPage() {
   );
 }
 
+function readinessCriteria(production: Production) {
+  const supplied = production.productionMetrics?.readinessCriteria;
+  const base = Array.isArray(supplied) ? supplied : [
+    { id: 'creative_direction', label: 'Creative direction', complete: Boolean(production.strategy) },
+    { id: 'runtime_target', label: 'Runtime target', complete: production.targetDurationMin > 0 },
+    { id: 'editorial_angle', label: 'Editorial angle', complete: Boolean(production.strategy?.centralQuestion) },
+    { id: 'source_verification', label: 'Source verification', complete: production.research?.status === 'source_locked' },
+    { id: 'script_approval', label: 'Script approval', complete: production.script?.status === 'approved' },
+    { id: 'storyboard_approval', label: 'Storyboard approval', complete: production.strategy?.continuityReport?.status === 'approved' },
+    { id: 'audio_generation', label: 'Audio generation', complete: production.audio?.status === 'generated' },
+  ];
+  return base.map((criterion: any) => {
+    if (criterion.id === 'audio_generation') return { ...criterion, complete: production.audio?.status === 'generated' };
+    return criterion;
+  });
+}
+
+function ReadinessBadge({ production }: { production: Production }) {
+  const criteria = readinessCriteria(production);
+  const completed = criteria.filter((item: any) => item.complete).length;
+  const percent = criteria.length ? Math.round((completed / criteria.length) * 100) : 0;
+  return <span className="youtube-readiness" title={`${completed} of ${criteria.length} readiness criteria complete`}><strong>{percent}%</strong> pre-production ready</span>;
+}
+
+function ReadinessChecklist({ production }: { production: Production }) {
+  const criteria = readinessCriteria(production);
+  const complete = criteria.filter((item: any) => item.complete);
+  const pending = criteria.filter((item: any) => !item.complete);
+  return <details className="youtube-readiness-details"><summary>What this readiness score means</summary><div><section><strong>Completed</strong>{complete.map((item: any) => <span key={item.id}>✓ {item.label}</span>)}</section><section><strong>Pending</strong>{pending.map((item: any) => <span key={item.id}>○ {item.label}</span>)}</section></div></details>;
+}
+
 function BriefPanel({ production }: { production: Production }) {
+  const normalized = production.normalizedTopic || production.strategy?.normalizedTopic || production.research?.normalizedTopic;
   return <div className="youtube-panel-stack">
+    {normalized && <section className="glass-card youtube-normalized-topic"><div className="youtube-section-heading"><div><span className="youtube-eyebrow">Normalized story</span><h2>{normalized.title}</h2></div><span className="youtube-status">Structured input</span></div><div className="youtube-normalized-grid"><div><small>Core topic</small><p>{normalized.topic}</p></div><div><small>Hook</small><p>{normalized.hook}</p></div><div><small>Central tension</small><p>{normalized.centralTension}</p></div><div><small>Viewer takeaway</small><p>{normalized.viewerTakeaway}</p></div></div><div className="youtube-chip-row">{normalized.entities?.map((entity: string) => <span key={entity}>{entity}</span>)}</div></section>}
     <section className="glass-card youtube-two-column">
       <div><span className="youtube-eyebrow">Editorial spine</span><h3>{production.strategy?.centralQuestion}</h3><p className="youtube-muted">{production.strategy?.viewerPromise}</p></div>
       <div><span className="youtube-eyebrow">Objective</span><p>{production.strategy?.objective}</p><div className="youtube-chip-row">{production.strategy?.keywords?.map((word: string) => <span key={word}>{word}</span>)}</div></div>
