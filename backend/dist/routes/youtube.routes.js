@@ -64,14 +64,15 @@ router.post('/productions', auth_middleware_1.authMiddleware, (0, auth_middlewar
         const format = typeof req.body.format === 'string' ? req.body.format : undefined;
         const tone = typeof req.body.tone === 'string' ? req.body.tone : undefined;
         const objective = typeof req.body.objective === 'string' ? req.body.objective : undefined;
-        if (topic.length < 3 || topic.length > 180) {
-            return void res.status(400).json({ error: 'Topic is required and must be under 180 characters' });
+        if (topic.length < 3 || topic.length > 4000) {
+            return void res.status(400).json({ error: 'Creative brief is required and must be under 4,000 characters' });
         }
         const plan = await (0, youtube_ai_planner_service_1.planYoutubeProductionWithAI)({ topic, audience, targetDurationMin, angleCount, format, tone, objective });
         const production = await prisma.youtubeProduction.create({
             data: {
                 userId: req.user.id,
                 topic: plan.topic,
+                normalizedTopic: plan.normalizedTopic,
                 audience: plan.audience,
                 targetDurationMin: plan.targetDurationMin,
                 status: 'planned',
@@ -82,6 +83,7 @@ router.post('/productions', auth_middleware_1.authMiddleware, (0, auth_middlewar
                 seo: plan.seo,
                 thumbnailConcepts: plan.thumbnailConcepts,
                 estimatedCreditsMin: plan.estimatedCreditsMin,
+                productionMetrics: plan.productionMetrics,
             },
         });
         await prisma.usageEvent.create({

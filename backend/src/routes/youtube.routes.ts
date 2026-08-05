@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { authMiddleware, AuthenticatedRequest, requireScope } from '../middleware/auth.middleware';
 import { planYoutubeProductionWithAI } from '../services/youtube-ai-planner.service';
 import { createYoutubeNarrationPackage } from '../services/youtube-narration.service';
@@ -60,8 +60,8 @@ router.post('/productions', authMiddleware, requireScope('projects:write'), rate
     const format = typeof req.body.format === 'string' ? req.body.format : undefined;
     const tone = typeof req.body.tone === 'string' ? req.body.tone : undefined;
     const objective = typeof req.body.objective === 'string' ? req.body.objective : undefined;
-    if (topic.length < 3 || topic.length > 180) {
-      return void res.status(400).json({ error: 'Topic is required and must be under 180 characters' });
+    if (topic.length < 3 || topic.length > 4000) {
+      return void res.status(400).json({ error: 'Creative brief is required and must be under 4,000 characters' });
     }
 
     const plan = await planYoutubeProductionWithAI({ topic, audience, targetDurationMin, angleCount, format, tone, objective });
@@ -69,16 +69,18 @@ router.post('/productions', authMiddleware, requireScope('projects:write'), rate
       data: {
         userId: req.user.id,
         topic: plan.topic,
+        normalizedTopic: plan.normalizedTopic as unknown as Prisma.InputJsonValue,
         audience: plan.audience,
         targetDurationMin: plan.targetDurationMin,
         status: 'planned',
-        research: plan.research,
-        strategy: plan.strategy,
+        research: plan.research as unknown as Prisma.InputJsonValue,
+        strategy: plan.strategy as unknown as Prisma.InputJsonValue,
         script: plan.script,
         storyboard: plan.storyboard,
         seo: plan.seo,
         thumbnailConcepts: plan.thumbnailConcepts,
         estimatedCreditsMin: plan.estimatedCreditsMin,
+        productionMetrics: plan.productionMetrics as unknown as Prisma.InputJsonValue,
       },
     });
 

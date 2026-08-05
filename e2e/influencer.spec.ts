@@ -73,8 +73,37 @@ test('adds a manual scene to an editable influencer plan', async ({ page }) => {
   await page.getByRole('button', { name: 'Projects', exact: true }).click();
   await page.getByRole('button', { name: /Maya morning routine/ }).click();
   await page.getByRole('button', { name: 'Add scene' }).click();
-  await expect(page.getByText('3. Scene 3')).toBeVisible();
-  expect(payload).toMatchObject({ duration_seconds: 1, camera_framing: 'Medium shot', product_visible: false });
+  await expect(page.getByRole('tab', { name: /Scene 3/ })).toBeVisible();
+  expect(payload).toMatchObject({ duration_seconds: 2, camera_framing: 'Medium shot', product_visible: false });
+});
+
+test('autosaves one reusable scene editor and preserves step navigation', async ({ page }) => {
+  let saved: any;
+  const updated = {
+    ...project,
+    scenes: [{ ...scene, description: 'A sharper opening hook.' }, project.scenes[1]],
+    scenesRevision: 2,
+  };
+  await authenticate(page);
+  await mockApi(page, {
+    'GET /api/v1/influencer/influencers': [], 'GET /api/v1/influencer/products': [],
+    'GET /api/v1/influencer/projects': [{ ...project, _count: { scenes: 2 } }],
+    'GET /api/v1/influencer/projects/influencer-project-1': project,
+    'PATCH /api/v1/influencer/projects/influencer-project-1/scenes/scene-1': async (route) => {
+      saved = route.request().postDataJSON();
+      await route.fulfill({ json: updated });
+    },
+  });
+  await page.goto('/influencer');
+  await page.getByRole('button', { name: 'Projects', exact: true }).click();
+  await page.getByRole('button', { name: /Maya morning routine/ }).click();
+  await page.getByLabel(/Scene description/).fill('A sharper opening hook.');
+  await expect(page.getByText('Saving draft…')).toBeVisible();
+  await expect.poll(() => saved).toMatchObject({ description: 'A sharper opening hook.' });
+  await expect(page.getByText('Draft saved')).toBeVisible();
+  await page.getByRole('button', { name: /Character/ }).first().click();
+  await expect(page).toHaveURL(/#character$/);
+  await expect(page.getByRole('heading', { name: 'Character & product' })).toBeVisible();
 });
 
 test('scans a public product URL and saves reviewed product data', async ({ page }) => {

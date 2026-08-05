@@ -459,6 +459,7 @@ model YoutubeProduction {
   user                User     @relation(fields: [userId], references: [id])
   projectId           String?  @map("project_id")
   topic               String
+  normalizedTopic     Json?    @map("normalized_topic")
   audience            String?
   targetDurationMin   Int      @default(8) @map("target_duration_min")
   status              String   @default("draft")
@@ -472,6 +473,7 @@ model YoutubeProduction {
   seo                 Json?
   thumbnailConcepts   Json?    @map("thumbnail_concepts")
   estimatedCreditsMin Int      @default(200) @map("estimated_credits_min")
+  productionMetrics   Json?    @map("production_metrics")
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
 
