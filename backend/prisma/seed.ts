@@ -25,6 +25,7 @@ async function main() {
       plan: 'free',
       creditsUsed: 0,
       creditsLimit: freePlan.creditsLimit,
+      emailVerifiedAt: new Date(),
       storageLimitBytes: freePlan.storageLimitBytes,
     },
   });

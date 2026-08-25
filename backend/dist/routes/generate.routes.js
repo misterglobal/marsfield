@@ -12,6 +12,7 @@ const media_probe_service_1 = require("../services/media-probe.service");
 const rate_limit_middleware_1 = require("../middleware/rate-limit.middleware");
 const model_registry_1 = require("../config/model-registry");
 const social_resize_service_1 = require("../services/social-resize.service");
+const free_tier_risk_service_1 = require("../services/free-tier-risk.service");
 const router = (0, express_1.Router)();
 const prisma = new client_1.PrismaClient();
 const replicateService = new replicate_service_1.ReplicateService();
@@ -671,6 +672,19 @@ router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1
                 return;
             }
         }
+        const gateVariationCount = workflow === 'social-resize'
+            ? (Array.isArray(predictionInput.formats) ? predictionInput.formats.length : 1)
+            : billingQuote.variationCount;
+        const generationReservation = await (0, free_tier_risk_service_1.reserveGeneration)({
+            user,
+            req,
+            workflow,
+            model,
+            prompt: predictionInput.prompt || prompt,
+            params: billingParams,
+            credits: billingQuote.totalCredits,
+            variationCount: gateVariationCount,
+        });
         if (workflow === 'social-resize') {
             const sourceVideo = String(predictionInput.source_video || '');
             const formats = (0, social_resize_service_1.assertSocialResizeFormats)(predictionInput.formats);
@@ -705,6 +719,7 @@ router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1
                 submittedPredictions.push(prediction);
                 await queue_service_1.queueService.addLocalProcessingJob({ kind: 'local', predictionId: prediction.id });
             }
+            await (0, free_tier_risk_service_1.finalizeGenerationReservation)(generationReservation, 0);
             const primaryPrediction = submittedPredictions[0];
             res.status(202).json({
                 id: primaryPrediction.id,
@@ -731,28 +746,6 @@ router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1
         const submittedPredictions = [];
         let acceptedCredits = 0;
         let acceptedVariations = 0;
-        // Reserve the full quote atomically before starting any paid provider work.
-        // The conditional UPDATE prevents concurrent requests from spending the
-        // same remaining balance.
-        const reserved = await prisma.$executeRaw `
-      UPDATE users
-      SET credits_used = credits_used + ${billingQuote.totalCredits}
-      WHERE id = ${user.id}
-        AND credits_used + ${billingQuote.totalCredits} <= credits_limit
-    `;
-        if (reserved !== 1) {
-            const account = await prisma.user.findUnique({
-                where: { id: user.id },
-                select: { creditsUsed: true, creditsLimit: true },
-            });
-            const remainingCredits = account ? account.creditsLimit - account.creditsUsed : 0;
-            res.status(403).json({
-                error: 'Generation quota exceeded. Please upgrade plan.',
-                credits_required: billingQuote.totalCredits,
-                credits_remaining: Math.max(0, remainingCredits),
-            });
-            return;
-        }
         try {
             for (let variationIndex = 0; variationIndex < billingQuote.variationCount; variationIndex++) {
                 const variantInput = {
@@ -827,12 +820,9 @@ router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1
         }
         catch (error) {
             const refundCredits = billingQuote.totalCredits - acceptedCredits;
+            await (0, free_tier_risk_service_1.refundUnacceptedCredits)(user.id, generationReservation.isFree, refundCredits);
+            await (0, free_tier_risk_service_1.finalizeGenerationReservation)(generationReservation, acceptedCredits);
             await prisma.$transaction([
-                ...(refundCredits > 0 ? [prisma.$executeRaw `
-          UPDATE users
-          SET credits_used = GREATEST(0, credits_used - ${refundCredits})
-          WHERE id = ${user.id}
-        `] : []),
                 ...(acceptedCredits > 0 ? [prisma.usageEvent.create({
                         data: {
                             userId: user.id,
@@ -852,6 +842,7 @@ router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1
             ]);
             throw error;
         }
+        await (0, free_tier_risk_service_1.finalizeGenerationReservation)(generationReservation, billingQuote.totalCredits);
         await prisma.usageEvent.create({
             data: {
                 userId: user.id,
@@ -883,6 +874,10 @@ router.post('/generate', auth_middleware_1.authMiddleware, (0, auth_middleware_1
         });
     }
     catch (error) {
+        if (error instanceof free_tier_risk_service_1.GenerationGateError) {
+            res.status(error.status).json({ error: error.message, code: error.code, ...error.details });
+            return;
+        }
         console.error('Submit prediction error:', error);
         res.status(500).json({ error: 'Failed submitting generation job' });
     }

@@ -5,6 +5,8 @@ import { planStoryboard } from '../services/storyboard-planner.service';
 import { queueService } from '../services/queue.service';
 import { normalizeTimelineClip } from '../services/timeline-export.service';
 import { rateLimit } from '../middleware/rate-limit.middleware';
+import { finalizeGenerationReservation, GenerationGateError, reserveGeneration } from '../services/free-tier-risk.service';
+import { getRemoteVideoDuration } from '../services/media-probe.service';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -327,6 +329,27 @@ router.post('/:id/timeline-export', authMiddleware, requireScope('projects:write
         endSeconds: clip.end_seconds,
       });
     });
+    const sourceDurations = new Map<string, number>();
+    for (const clip of clips) {
+      if (!sourceDurations.has(clip.sourceUrl)) {
+        sourceDurations.set(clip.sourceUrl, await getRemoteVideoDuration(clip.sourceUrl));
+      }
+    }
+    const renderDuration = clips.reduce((total, clip) => {
+      const sourceDuration = sourceDurations.get(clip.sourceUrl) || 0;
+      return total + Math.max(0, (clip.endSeconds ?? sourceDuration) - clip.startSeconds);
+    }, 0);
+    const exportPrompt = typeof req.body.title === 'string' && req.body.title.trim() ? req.body.title.trim().slice(0, 160) : 'Timeline export';
+    const reservation = await reserveGeneration({
+      user,
+      req,
+      workflow: 'timeline-export',
+      model: 'local/ffmpeg-timeline',
+      prompt: exportPrompt,
+      params: { duration: renderDuration },
+      credits: 0,
+      variationCount: 1,
+    });
 
     const prediction = await prisma.prediction.create({
       data: {
@@ -334,7 +357,7 @@ router.post('/:id/timeline-export', authMiddleware, requireScope('projects:write
         projectId: project.id,
         workflow: 'timeline-export',
         model: 'local/ffmpeg-timeline',
-        prompt: typeof req.body.title === 'string' && req.body.title.trim() ? req.body.title.trim().slice(0, 160) : 'Timeline export',
+        prompt: exportPrompt,
         inputParams: {
           clip_count: clips.length,
           clips: requestedClips.map((clip: TimelineExportRequestClip, index: number) => ({
@@ -354,6 +377,7 @@ router.post('/:id/timeline-export', authMiddleware, requireScope('projects:write
     });
 
     await queueService.addLocalProcessingJob({ kind: 'local', predictionId: prediction.id });
+    await finalizeGenerationReservation(reservation, 0);
     res.status(202).json({
       id: prediction.id,
       status: prediction.status,
@@ -361,6 +385,10 @@ router.post('/:id/timeline-export', authMiddleware, requireScope('projects:write
       credits_charged: 0,
     });
   } catch (error) {
+    if (error instanceof GenerationGateError) {
+      res.status(error.status).json({ error: error.message, code: error.code, ...error.details });
+      return;
+    }
     console.error('Timeline export error:', error);
     res.status(400).json({ error: error instanceof Error ? error.message : 'Failed exporting timeline' });
   }

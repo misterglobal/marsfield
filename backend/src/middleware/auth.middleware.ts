@@ -20,6 +20,9 @@ export interface AuthenticatedRequest extends Request {
     plan: string;
     creditsUsed: number;
     creditsLimit: number;
+    freeCreditsUsedLifetime: number;
+    emailVerifiedAt: Date | null;
+    phoneVerifiedAt: Date | null;
   };
 }
 
@@ -53,6 +56,9 @@ export async function authMiddleware(
               plan: true,
               creditsUsed: true,
               creditsLimit: true,
+              freeCreditsUsedLifetime: true,
+              emailVerifiedAt: true,
+              phoneVerifiedAt: true,
             },
           },
         },
@@ -99,6 +105,9 @@ export async function authMiddleware(
         plan: true,
         creditsUsed: true,
         creditsLimit: true,
+        freeCreditsUsedLifetime: true,
+        emailVerifiedAt: true,
+        phoneVerifiedAt: true,
         authVersion: true,
       },
     });

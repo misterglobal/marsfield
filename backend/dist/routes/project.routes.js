@@ -7,6 +7,8 @@ const storyboard_planner_service_1 = require("../services/storyboard-planner.ser
 const queue_service_1 = require("../services/queue.service");
 const timeline_export_service_1 = require("../services/timeline-export.service");
 const rate_limit_middleware_1 = require("../middleware/rate-limit.middleware");
+const free_tier_risk_service_1 = require("../services/free-tier-risk.service");
+const media_probe_service_1 = require("../services/media-probe.service");
 const router = (0, express_1.Router)();
 const prisma = new client_1.PrismaClient();
 // GET /api/v1/projects
@@ -297,13 +299,34 @@ router.post('/:id/timeline-export', auth_middleware_1.authMiddleware, (0, auth_m
                 endSeconds: clip.end_seconds,
             });
         });
+        const sourceDurations = new Map();
+        for (const clip of clips) {
+            if (!sourceDurations.has(clip.sourceUrl)) {
+                sourceDurations.set(clip.sourceUrl, await (0, media_probe_service_1.getRemoteVideoDuration)(clip.sourceUrl));
+            }
+        }
+        const renderDuration = clips.reduce((total, clip) => {
+            const sourceDuration = sourceDurations.get(clip.sourceUrl) || 0;
+            return total + Math.max(0, (clip.endSeconds ?? sourceDuration) - clip.startSeconds);
+        }, 0);
+        const exportPrompt = typeof req.body.title === 'string' && req.body.title.trim() ? req.body.title.trim().slice(0, 160) : 'Timeline export';
+        const reservation = await (0, free_tier_risk_service_1.reserveGeneration)({
+            user,
+            req,
+            workflow: 'timeline-export',
+            model: 'local/ffmpeg-timeline',
+            prompt: exportPrompt,
+            params: { duration: renderDuration },
+            credits: 0,
+            variationCount: 1,
+        });
         const prediction = await prisma.prediction.create({
             data: {
                 userId: user.id,
                 projectId: project.id,
                 workflow: 'timeline-export',
                 model: 'local/ffmpeg-timeline',
-                prompt: typeof req.body.title === 'string' && req.body.title.trim() ? req.body.title.trim().slice(0, 160) : 'Timeline export',
+                prompt: exportPrompt,
                 inputParams: {
                     clip_count: clips.length,
                     clips: requestedClips.map((clip, index) => ({
@@ -322,6 +345,7 @@ router.post('/:id/timeline-export', auth_middleware_1.authMiddleware, (0, auth_m
             },
         });
         await queue_service_1.queueService.addLocalProcessingJob({ kind: 'local', predictionId: prediction.id });
+        await (0, free_tier_risk_service_1.finalizeGenerationReservation)(reservation, 0);
         res.status(202).json({
             id: prediction.id,
             status: prediction.status,
@@ -330,6 +354,10 @@ router.post('/:id/timeline-export', auth_middleware_1.authMiddleware, (0, auth_m
         });
     }
     catch (error) {
+        if (error instanceof free_tier_risk_service_1.GenerationGateError) {
+            res.status(error.status).json({ error: error.message, code: error.code, ...error.details });
+            return;
+        }
         console.error('Timeline export error:', error);
         res.status(400).json({ error: error instanceof Error ? error.message : 'Failed exporting timeline' });
     }

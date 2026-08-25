@@ -1,5 +1,14 @@
 const API_BASE_URL = '/api/v1';
 
+export function getDeviceId(): string {
+  if (typeof window === 'undefined') return '';
+  const existing = localStorage.getItem('marsfield_device_id');
+  if (existing) return existing;
+  const created = crypto.randomUUID().replace(/-/g, '');
+  localStorage.setItem('marsfield_device_id', created);
+  return created;
+}
+
 async function request(endpoint: string, options: RequestInit = {}) {
   const url = `${API_BASE_URL}${endpoint}`;
   
@@ -9,6 +18,7 @@ async function request(endpoint: string, options: RequestInit = {}) {
   };
 
   if (typeof window !== 'undefined') {
+    headers['X-Device-ID'] = getDeviceId();
     const token = localStorage.getItem('token');
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
@@ -50,6 +60,14 @@ export const api = {
   resetPassword: (token: string, password: string) => request('/auth/reset-password', {
     method: 'POST',
     body: JSON.stringify({ token, password }),
+  }),
+  verifyEmail: (token: string) => request('/auth/verify-email', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  }),
+  resendVerification: (email: string) => request('/auth/resend-verification', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
   }),
 
   // Predictions
@@ -204,5 +222,13 @@ export const api = {
   }),
   deleteApiKey: (id: string) => request(`/account/api-keys/${id}`, {
     method: 'DELETE',
+  }),
+  startPhoneVerification: (phone: string) => request('/account/phone/start', {
+    method: 'POST',
+    body: JSON.stringify({ phone }),
+  }),
+  checkPhoneVerification: (phone: string, code: string) => request('/account/phone/check', {
+    method: 'POST',
+    body: JSON.stringify({ phone, code }),
   }),
 };

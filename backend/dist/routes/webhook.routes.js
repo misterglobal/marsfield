@@ -5,6 +5,7 @@ const client_1 = require("@prisma/client");
 const crypto_1 = require("crypto");
 const asset_service_1 = require("../services/asset.service");
 const freemius_service_1 = require("../services/freemius.service");
+const free_tier_risk_service_1 = require("../services/free-tier-risk.service");
 const router = (0, express_1.Router)();
 const prisma = new client_1.PrismaClient();
 const REPLICATE_WEBHOOK_TOLERANCE_SECONDS = 5 * 60;
@@ -51,6 +52,13 @@ function getString(value) {
     if (value === undefined || value === null || value === '')
         return undefined;
     return String(value);
+}
+function paymentCardFingerprint(event) {
+    return getString(event?.objects?.payment?.card?.fingerprint
+        || event?.objects?.payment?.card_fingerprint
+        || event?.payment?.card?.fingerprint
+        || event?.payment?.card_fingerprint
+        || event?.objects?.subscription?.card?.fingerprint);
 }
 function getOutputUrl(value) {
     if (typeof value === 'string')
@@ -144,6 +152,7 @@ router.post('/freemius', async (req, res) => {
         const isCanceled = licenseSaysCanceled || isCancellationEvent(eventType);
         const providerEventId = getString(event.id)
             || `${eventType}:${fsLicenseId || fsUserId || 'unknown'}:${(0, crypto_1.createHash)('sha256').update(rawBody).digest('hex')}`;
+        const cardFingerprint = paymentCardFingerprint(event);
         const user = fsEmail
             ? await prisma.user.findUnique({ where: { email: fsEmail.toLowerCase() }, select: { id: true } })
             : null;
@@ -216,6 +225,7 @@ router.post('/freemius', async (req, res) => {
                 where: { id: user.id },
                 data: updateUserData,
             });
+            await (0, free_tier_risk_service_1.recordRiskSignal)(user.id, 'card', cardFingerprint, tx);
             if (shouldResetCredits(eventType)) {
                 await tx.usageEvent.create({
                     data: {

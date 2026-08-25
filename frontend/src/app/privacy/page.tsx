@@ -24,7 +24,7 @@ export default function PrivacyPage() {
         <h3>Billing and transaction data</h3>
         <p>Freemius handles checkout and payment processing as merchant of record. We receive subscription, plan, license, transaction-status, and customer-identification data needed to activate and administer your plan. We do not receive or store full payment-card numbers.</p>
         <h3>Usage and technical data</h3>
-        <p>We collect credit usage, storage use, prediction status, API-key usage timestamps, logs, error details, IP address, browser/device information, and security events. Authentication information may be stored in your browser’s local storage to keep you signed in.</p>
+        <p>We collect credit usage, storage use, prediction status, API-key usage timestamps, logs, error details, IP address, browser/device information, and security events. To prevent repeated free-trial abuse, we also compare one-way-hashed device identifiers, phone numbers, payment-card fingerprints supplied by our billing provider, email domains, and repeated generation content. Authentication information may be stored in your browser’s local storage to keep you signed in.</p>
         <h3>Feedback and support data</h3>
         <p>If you submit feedback or report a problem, we collect your message, issue type, account identifier, current page URL, browser/device details, and related troubleshooting context so we can diagnose and respond to the issue.</p>
       </section>

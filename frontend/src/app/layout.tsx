@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect, createContext, useContext, type FormEvent } from "react";
-import { api } from "@/lib/api";
+import { api, getDeviceId } from "@/lib/api";
+import { Turnstile } from "@/components/Turnstile";
 import "./globals.css";
 
 interface UserInfo {
@@ -48,6 +49,7 @@ export default function RootLayout({
   const [loginEmail, setLoginEmail] = useState('creator@marsfield.ai');
   const [loginPassword, setLoginPassword] = useState('password123');
   const [registerName, setRegisterName] = useState('');
+  const [captchaToken, setCaptchaToken] = useState('');
   const [loginError, setLoginError] = useState('');
   const [recoveryMessage, setRecoveryMessage] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
@@ -89,13 +91,23 @@ export default function RootLayout({
     setLoginLoading(true);
     setLoginError('');
     try {
-      const data = await api.register({ email, password, name: name?.trim() || undefined });
-      localStorage.setItem('token', data.token);
-      localStorage.setItem('user', JSON.stringify(data.user));
-      setToken(data.token);
-      setUser(data.user);
-      setShowLogin(false);
-      setAuthMode('login');
+      const data = await api.register({
+        email,
+        password,
+        name: name?.trim() || undefined,
+        captcha_token: captchaToken || undefined,
+        device_fingerprint: getDeviceId(),
+      });
+      if (data.token) {
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('user', JSON.stringify(data.user));
+        setToken(data.token);
+        setUser(data.user);
+        setShowLogin(false);
+      } else {
+        setRecoveryMessage(data.message || 'Check your email to verify your account.');
+        setAuthMode('login');
+      }
     } catch (err: any) {
       setLoginError(err.message || 'Account creation failed');
     } finally {
@@ -112,6 +124,19 @@ export default function RootLayout({
       setRecoveryMessage(data.message);
     } catch (err: any) {
       setLoginError(err.message || 'Could not request a recovery link');
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    setLoginLoading(true);
+    setLoginError('');
+    try {
+      const data = await api.resendVerification(loginEmail);
+      setRecoveryMessage(data.message);
+    } catch (err: any) {
+      setLoginError(err.message || 'Could not resend verification email');
     } finally {
       setLoginLoading(false);
     }
@@ -427,6 +452,11 @@ export default function RootLayout({
                 {loginError && (
                   <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", padding: "0.75rem", borderRadius: "8px", fontSize: "0.85rem", color: "#ef4444" }}>
                     {loginError}
+                    {loginError.toLowerCase().includes('verify your email') && (
+                      <button type="button" onClick={() => void handleResendVerification()} style={{ display: 'block', marginTop: '0.5rem', background: 'none', border: 0, color: 'inherit', padding: 0, textDecoration: 'underline', cursor: 'pointer' }}>
+                        Resend verification email
+                      </button>
+                    )}
                   </div>
                 )}
                 {recoveryMessage && (
@@ -446,6 +476,9 @@ export default function RootLayout({
                       onChange={(e) => setRegisterName(e.target.value)}
                     />
                   </div>
+                )}
+                {authMode === 'register' && process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && (
+                  <Turnstile siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY} onToken={setCaptchaToken} />
                 )}
                 <div>
                   <label className="form-label">Email</label>
