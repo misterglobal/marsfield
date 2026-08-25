@@ -38,8 +38,18 @@ Key services:
 replicate.service.ts — wraps Replicate API, handles webhooks
 storage.service.ts — R2 file uploads/downloads
 billing.service.ts — credit quoting before generation
+free-tier-risk.service.ts — atomic user/risk-group credit, concurrency, and daily platform budget reservations
 queue.service.ts — BullMQ job tracking for async predictions
 freemius.service.ts — subscription management
+
+---
+
+Free-tier risk controls
+
+- New accounts complete Turnstile and email verification. Twilio Verify provides step-up phone verification when multiple risk signals match.
+- Free credits are lifetime credits. Accounts connected through hashed phone, card, or device signals share one allowance; IP, company-domain, and repeated-content matches contribute to a score but IP alone never blocks an account.
+- Provider work starts only after a serializable database transaction reserves user/group credits, a concurrent-job slot, the daily free budget, and the platform safety budget.
+- Defaults and provider credentials are documented in `.env.example`. Production Compose requires both Turnstile keys and `RISK_SIGNAL_PEPPER`.
 
 ---
 

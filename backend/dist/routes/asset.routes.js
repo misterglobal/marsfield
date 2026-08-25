@@ -7,6 +7,8 @@ const storage_service_1 = require("../services/storage.service");
 const queue_service_1 = require("../services/queue.service");
 const video_packaging_service_1 = require("../services/video-packaging.service");
 const rate_limit_middleware_1 = require("../middleware/rate-limit.middleware");
+const free_tier_risk_service_1 = require("../services/free-tier-risk.service");
+const media_probe_service_1 = require("../services/media-probe.service");
 const router = (0, express_1.Router)();
 const prisma = new client_1.PrismaClient();
 function isAssetDeleteEnabledForUser(email) {
@@ -179,6 +181,16 @@ router.post('/:id/packaging/thumbnails', auth_middleware_1.authMiddleware, (0, a
             return;
         }
         const times = await (0, video_packaging_service_1.thumbnailCandidateTimes)(asset.url, req.body?.times);
+        const reservation = await (0, free_tier_risk_service_1.reserveGeneration)({
+            user,
+            req,
+            workflow: 'thumbnail-stills',
+            model: 'local/ffmpeg-thumbnail-stills',
+            prompt: `Thumbnail stills for asset ${asset.id}`,
+            params: {},
+            credits: 0,
+            variationCount: times.length,
+        });
         const predictions = [];
         for (let index = 0; index < times.length; index++) {
             const time = times[index];
@@ -202,9 +214,14 @@ router.post('/:id/packaging/thumbnails', auth_middleware_1.authMiddleware, (0, a
             predictions.push({ id: prediction.id, status: prediction.status, time_seconds: time });
             await queue_service_1.queueService.addLocalProcessingJob({ kind: 'local', predictionId: prediction.id });
         }
+        await (0, free_tier_risk_service_1.finalizeGenerationReservation)(reservation, 0);
         res.status(202).json({ predictions, credits_charged: 0 });
     }
     catch (error) {
+        if (error instanceof free_tier_risk_service_1.GenerationGateError) {
+            res.status(error.status).json({ error: error.message, code: error.code, ...error.details });
+            return;
+        }
         console.error('Video thumbnail stills error:', error);
         res.status(400).json({ error: error instanceof Error ? error.message : 'Failed creating thumbnail stills' });
     }
@@ -228,6 +245,17 @@ router.post('/:id/packaging/title-overlay', auth_middleware_1.authMiddleware, (0
             res.status(400).json({ error: 'Title is required' });
             return;
         }
+        const sourceDuration = await (0, media_probe_service_1.getRemoteVideoDuration)(asset.url);
+        const reservation = await (0, free_tier_risk_service_1.reserveGeneration)({
+            user,
+            req,
+            workflow: 'title-overlay',
+            model: 'local/ffmpeg-title-overlay',
+            prompt: title,
+            params: { duration: sourceDuration },
+            credits: 0,
+            variationCount: 1,
+        });
         const prediction = await prisma.prediction.create({
             data: {
                 userId: user.id,
@@ -246,9 +274,14 @@ router.post('/:id/packaging/title-overlay', auth_middleware_1.authMiddleware, (0
             },
         });
         await queue_service_1.queueService.addLocalProcessingJob({ kind: 'local', predictionId: prediction.id });
+        await (0, free_tier_risk_service_1.finalizeGenerationReservation)(reservation, 0);
         res.status(202).json({ id: prediction.id, status: prediction.status, output_url: prediction.outputUrl, credits_charged: 0 });
     }
     catch (error) {
+        if (error instanceof free_tier_risk_service_1.GenerationGateError) {
+            res.status(error.status).json({ error: error.message, code: error.code, ...error.details });
+            return;
+        }
         console.error('Video title overlay error:', error);
         res.status(400).json({ error: error instanceof Error ? error.message : 'Failed creating title overlay' });
     }

@@ -15,16 +15,18 @@ import feedbackRouter from './routes/feedback.routes';
 import influencerRouter from './routes/influencer.routes';
 import { queueService } from './services/queue.service';
 import { startRetentionScheduler } from './services/retention.service';
+import { initializeFreeTierRiskControls } from './services/free-tier-risk.service';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS || (process.env.NODE_ENV === 'production' ? 1 : 0)));
 
 // CORS Configuration - restrict to frontend origins
 const corsOptions = {
   origin: process.env.FRONTEND_URL || 'http://localhost:3000',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Device-ID'],
 };
 
 app.use(cors(corsOptions));
@@ -50,10 +52,18 @@ app.get('/api/v1/health', (req, res) => {
   res.json({ status: 'ok', service: 'marsfield-backend' });
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-  void queueService.resumeIncompleteJobs().catch((error) => {
-    console.error('Failed to resume incomplete generation jobs:', error);
+async function startServer(): Promise<void> {
+  await initializeFreeTierRiskControls();
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+    void queueService.resumeIncompleteJobs().catch((error) => {
+      console.error('Failed to resume incomplete generation jobs:', error);
+    });
+    startRetentionScheduler();
   });
-  startRetentionScheduler();
+}
+
+void startServer().catch((error) => {
+  console.error('Failed to initialize server:', error);
+  process.exit(1);
 });

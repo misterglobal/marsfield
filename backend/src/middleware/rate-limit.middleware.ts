@@ -3,15 +3,15 @@ import { createHash } from 'crypto';
 import Redis from 'ioredis';
 import { AuthenticatedRequest } from './auth.middleware';
 
-type RateLimitBucket = 'generation' | 'upload' | 'quote' | 'feedback';
+type RateLimitBucket = 'generation' | 'upload' | 'quote' | 'feedback' | 'verification';
 
 const WINDOW_SECONDS = 60;
 const PLAN_LIMITS: Record<string, Record<RateLimitBucket, number>> = {
-  free: { generation: 3, upload: 10, quote: 15, feedback: 3 },
-  starter: { generation: 10, upload: 30, quote: 30, feedback: 5 },
-  creator: { generation: 20, upload: 45, quote: 45, feedback: 8 },
-  pro: { generation: 40, upload: 60, quote: 60, feedback: 10 },
-  studio: { generation: 80, upload: 120, quote: 120, feedback: 15 },
+  free: { generation: 3, upload: 10, quote: 15, feedback: 3, verification: 3 },
+  starter: { generation: 10, upload: 30, quote: 30, feedback: 5, verification: 3 },
+  creator: { generation: 20, upload: 45, quote: 45, feedback: 8, verification: 3 },
+  pro: { generation: 40, upload: 60, quote: 60, feedback: 10, verification: 3 },
+  studio: { generation: 80, upload: 120, quote: 120, feedback: 15, verification: 3 },
 };
 
 const redisUrl = process.env.REDIS_URL;

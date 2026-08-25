@@ -32,6 +32,9 @@ interface UsageSummary {
   credits_used: number;
   credits_limit: number;
   credits_remaining: number;
+  email_verified?: boolean;
+  phone_verified?: boolean;
+  phone_last_four?: string | null;
   storage_usage_bytes?: number;
   storage_limit_bytes?: string;
   storage_remaining_bytes?: string;
@@ -73,6 +76,10 @@ export default function SettingsPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [checkoutTier, setCheckoutTier] = useState('');
+  const [phone, setPhone] = useState('');
+  const [phoneCode, setPhoneCode] = useState('');
+  const [phoneStatus, setPhoneStatus] = useState('');
+  const [phoneCodeSent, setPhoneCodeSent] = useState(false);
 
   const loadSettings = useCallback(async () => {
     if (!token) return;
@@ -141,6 +148,31 @@ export default function SettingsPage() {
     }
   };
 
+  const handleStartPhoneVerification = async () => {
+    setError('');
+    setPhoneStatus('');
+    try {
+      const result = await api.startPhoneVerification(phone);
+      setPhoneCodeSent(true);
+      setPhoneStatus(result.message);
+    } catch (err: any) {
+      setError(err.message || 'Could not send a verification code');
+    }
+  };
+
+  const handleCheckPhoneVerification = async () => {
+    setError('');
+    try {
+      const result = await api.checkPhoneVerification(phone, phoneCode);
+      setPhoneStatus(result.message);
+      setPhoneCodeSent(false);
+      setPhoneCode('');
+      await loadSettings();
+    } catch (err: any) {
+      setError(err.message || 'Could not verify the phone number');
+    }
+  };
+
   if (!token) {
     return (
       <div className="glass-card" style={{ padding: '4rem', textAlign: 'center' }}>
@@ -181,6 +213,25 @@ export default function SettingsPage() {
             </code>
           </section>
         )}
+
+        <section className="glass-card">
+          <h3 style={{ marginTop: 0 }}>Account verification</h3>
+          <p style={{ color: 'var(--foreground-muted)', fontSize: '0.85rem' }}>
+            Email: {usage?.email_verified ? 'verified' : 'verification required'} · Phone: {usage?.phone_verified ? `verified ending in ${usage.phone_last_four}` : 'not verified'}
+          </p>
+          {!usage?.phone_verified && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem' }}>
+              <input className="form-input" style={{ flex: '1 1 220px' }} value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="+14165551234" aria-label="Phone number" />
+              {!phoneCodeSent ? (
+                <button className="btn btn-secondary" type="button" onClick={handleStartPhoneVerification}>Send code</button>
+              ) : <>
+                <input className="form-input" style={{ flex: '0 1 150px' }} value={phoneCode} onChange={(event) => setPhoneCode(event.target.value)} placeholder="Code" aria-label="Phone verification code" />
+                <button className="btn btn-primary" type="button" onClick={handleCheckPhoneVerification}>Verify</button>
+              </>}
+            </div>
+          )}
+          {phoneStatus && <p style={{ color: '#86efac', fontSize: '0.82rem' }}>{phoneStatus}</p>}
+        </section>
 
         <section className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
           <h3 style={{ fontSize: '1.15rem', fontWeight: 700 }}>🔑 API Credentials</h3>

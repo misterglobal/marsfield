@@ -19,14 +19,16 @@ const feedback_routes_1 = __importDefault(require("./routes/feedback.routes"));
 const influencer_routes_1 = __importDefault(require("./routes/influencer.routes"));
 const queue_service_1 = require("./services/queue.service");
 const retention_service_1 = require("./services/retention.service");
+const free_tier_risk_service_1 = require("./services/free-tier-risk.service");
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 3001;
+app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS || (process.env.NODE_ENV === 'production' ? 1 : 0)));
 // CORS Configuration - restrict to frontend origins
 const corsOptions = {
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Device-ID'],
 };
 app.use((0, cors_1.default)(corsOptions));
 app.use(['/api/v1/webhooks/freemius', '/api/v1/webhooks/replicate'], express_1.default.raw({ type: 'application/json', limit: '2mb' }));
@@ -48,10 +50,17 @@ app.use('/api/v1/webhooks', webhook_routes_1.default);
 app.get('/api/v1/health', (req, res) => {
     res.json({ status: 'ok', service: 'marsfield-backend' });
 });
-app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-    void queue_service_1.queueService.resumeIncompleteJobs().catch((error) => {
-        console.error('Failed to resume incomplete generation jobs:', error);
+async function startServer() {
+    await (0, free_tier_risk_service_1.initializeFreeTierRiskControls)();
+    app.listen(PORT, () => {
+        console.log(`Server running on http://localhost:${PORT}`);
+        void queue_service_1.queueService.resumeIncompleteJobs().catch((error) => {
+            console.error('Failed to resume incomplete generation jobs:', error);
+        });
+        (0, retention_service_1.startRetentionScheduler)();
     });
-    (0, retention_service_1.startRetentionScheduler)();
+}
+void startServer().catch((error) => {
+    console.error('Failed to initialize server:', error);
+    process.exit(1);
 });

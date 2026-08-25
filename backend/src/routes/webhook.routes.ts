@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'crypto';
 import { createAssetForPrediction, createSupplementaryAssetForPrediction } from '../services/asset.service';
 import { getPlan, getPlanByFreemiusPlanId, parseFreemiusDate, verifyFreemiusSignature } from '../services/freemius.service';
+import { recordRiskSignal } from '../services/free-tier-risk.service';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -47,6 +48,16 @@ function verifyReplicateWebhook(rawBody: Buffer, headers: Record<string, unknown
 function getString(value: unknown): string | undefined {
   if (value === undefined || value === null || value === '') return undefined;
   return String(value);
+}
+
+function paymentCardFingerprint(event: any): string | undefined {
+  return getString(
+    event?.objects?.payment?.card?.fingerprint
+    || event?.objects?.payment?.card_fingerprint
+    || event?.payment?.card?.fingerprint
+    || event?.payment?.card_fingerprint
+    || event?.objects?.subscription?.card?.fingerprint,
+  );
 }
 
 function getOutputUrl(value: unknown): string | undefined {
@@ -151,6 +162,7 @@ router.post('/freemius', async (req, res) => {
     const isCanceled = licenseSaysCanceled || isCancellationEvent(eventType);
     const providerEventId = getString(event.id)
       || `${eventType}:${fsLicenseId || fsUserId || 'unknown'}:${createHash('sha256').update(rawBody).digest('hex')}`;
+    const cardFingerprint = paymentCardFingerprint(event);
 
     const user = fsEmail
       ? await prisma.user.findUnique({ where: { email: fsEmail.toLowerCase() }, select: { id: true } })
@@ -228,6 +240,7 @@ router.post('/freemius', async (req, res) => {
         where: { id: user.id },
         data: updateUserData,
       });
+      await recordRiskSignal(user.id, 'card', cardFingerprint, tx);
 
       if (shouldResetCredits(eventType)) {
         await tx.usageEvent.create({

@@ -5,6 +5,9 @@ const client_1 = require("@prisma/client");
 const crypto_1 = require("crypto");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const freemius_service_1 = require("../services/freemius.service");
+const phone_verification_service_1 = require("../services/phone-verification.service");
+const free_tier_risk_service_1 = require("../services/free-tier-risk.service");
+const rate_limit_middleware_1 = require("../middleware/rate-limit.middleware");
 const router = (0, express_1.Router)();
 const prisma = new client_1.PrismaClient();
 const BILLABLE_TIERS = new Set(['starter', 'creator', 'pro', 'studio']);
@@ -33,6 +36,10 @@ router.get('/usage', auth_middleware_1.authMiddleware, async (req, res) => {
                     plan: true,
                     creditsUsed: true,
                     creditsLimit: true,
+                    freeCreditsUsedLifetime: true,
+                    emailVerifiedAt: true,
+                    phoneVerifiedAt: true,
+                    phoneLastFour: true,
                     storageUsageBytes: true,
                     storageLimitBytes: true,
                 },
@@ -64,11 +71,27 @@ router.get('/usage', auth_middleware_1.authMiddleware, async (req, res) => {
             res.status(404).json({ error: 'User not found' });
             return;
         }
+        let displayedCreditsUsed = freshUser.plan === 'free' ? freshUser.freeCreditsUsedLifetime : freshUser.creditsUsed;
+        let displayedCreditsLimit = freshUser.creditsLimit;
+        if (freshUser.plan === 'free') {
+            const risk = await (0, free_tier_risk_service_1.getRiskContext)(user.id);
+            const grouped = await prisma.user.aggregate({
+                where: { id: { in: risk.groupUserIds } },
+                _sum: { freeCreditsUsedLifetime: true },
+                _min: { creditsLimit: true },
+            });
+            displayedCreditsUsed = grouped._sum.freeCreditsUsedLifetime || 0;
+            displayedCreditsLimit = Math.min(freshUser.creditsLimit, grouped._min.creditsLimit || freshUser.creditsLimit);
+        }
         res.json({
             plan: freshUser.plan,
-            credits_used: freshUser.creditsUsed,
-            credits_limit: freshUser.creditsLimit,
-            credits_remaining: Math.max(0, freshUser.creditsLimit - freshUser.creditsUsed),
+            credits_used: displayedCreditsUsed,
+            free_credits_used_lifetime: freshUser.freeCreditsUsedLifetime,
+            credits_limit: displayedCreditsLimit,
+            credits_remaining: Math.max(0, displayedCreditsLimit - displayedCreditsUsed),
+            email_verified: Boolean(freshUser.emailVerifiedAt),
+            phone_verified: Boolean(freshUser.phoneVerifiedAt),
+            phone_last_four: freshUser.phoneLastFour,
             storage_usage_bytes: freshUser.storageUsageBytes,
             storage_limit_bytes: freshUser.storageLimitBytes.toString(),
             storage_remaining_bytes: (freshUser.storageLimitBytes - BigInt(freshUser.storageUsageBytes)).toString(),
@@ -88,6 +111,55 @@ router.get('/usage', auth_middleware_1.authMiddleware, async (req, res) => {
     catch (error) {
         console.error('Fetch account usage error:', error);
         res.status(500).json({ error: 'Failed retrieving account usage' });
+    }
+});
+// POST /api/v1/account/phone/start
+router.post('/phone/start', auth_middleware_1.authMiddleware, (0, rate_limit_middleware_1.rateLimit)('verification'), async (req, res) => {
+    try {
+        if (!req.user) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+        if (req.authType !== 'jwt') {
+            res.status(403).json({ error: 'Phone verification requires a browser session' });
+            return;
+        }
+        const phone = (0, phone_verification_service_1.normalizePhone)(req.body?.phone);
+        await (0, phone_verification_service_1.startPhoneVerification)(phone);
+        res.status(202).json({ message: 'Verification code sent.' });
+    }
+    catch (error) {
+        res.status(400).json({ error: error instanceof Error ? error.message : 'Could not start phone verification' });
+    }
+});
+// POST /api/v1/account/phone/check
+router.post('/phone/check', auth_middleware_1.authMiddleware, (0, rate_limit_middleware_1.rateLimit)('verification'), async (req, res) => {
+    try {
+        if (!req.user) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+        if (req.authType !== 'jwt') {
+            res.status(403).json({ error: 'Phone verification requires a browser session' });
+            return;
+        }
+        const phone = (0, phone_verification_service_1.normalizePhone)(req.body?.phone);
+        if (!await (0, phone_verification_service_1.checkPhoneVerification)(phone, req.body?.code)) {
+            res.status(400).json({ error: 'The verification code is invalid or expired.' });
+            return;
+        }
+        await prisma.$transaction(async (tx) => {
+            await tx.user.update({
+                where: { id: req.user.id },
+                data: { phoneVerifiedAt: new Date(), phoneLastFour: phone.slice(-4) },
+            });
+            await (0, free_tier_risk_service_1.recordRiskSignal)(req.user.id, 'phone', phone, tx);
+        });
+        const risk = await (0, free_tier_risk_service_1.getRiskContext)(req.user.id);
+        res.json({ message: 'Phone verified.', risk_group_accounts: risk.groupUserIds.length });
+    }
+    catch (error) {
+        res.status(400).json({ error: error instanceof Error ? error.message : 'Could not verify phone' });
     }
 });
 // GET /api/v1/account/plans

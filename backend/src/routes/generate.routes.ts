@@ -10,6 +10,12 @@ import { getRemoteImageMegapixels, getRemoteMediaDuration, getRemoteVideoDuratio
 import { rateLimit } from '../middleware/rate-limit.middleware';
 import { getModelDefinition, modelIdsForFamily, modelSupportsWorkflow } from '../config/model-registry';
 import { assertSocialResizeFormat, assertSocialResizeFormats, assertSocialResizeMode, socialResizeLabel } from '../services/social-resize.service';
+import {
+  finalizeGenerationReservation,
+  GenerationGateError,
+  refundUnacceptedCredits,
+  reserveGeneration,
+} from '../services/free-tier-risk.service';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -642,6 +648,20 @@ router.post('/generate', authMiddleware, requireScope('generation:write'), rateL
       }
     }
 
+    const gateVariationCount = workflow === 'social-resize'
+      ? (Array.isArray(predictionInput.formats) ? predictionInput.formats.length : 1)
+      : billingQuote.variationCount;
+    const generationReservation = await reserveGeneration({
+      user,
+      req,
+      workflow,
+      model,
+      prompt: predictionInput.prompt || prompt,
+      params: billingParams,
+      credits: billingQuote.totalCredits,
+      variationCount: gateVariationCount,
+    });
+
     if (workflow === 'social-resize') {
       const sourceVideo = String(predictionInput.source_video || '');
       const formats = assertSocialResizeFormats(predictionInput.formats);
@@ -677,6 +697,7 @@ router.post('/generate', authMiddleware, requireScope('generation:write'), rateL
         submittedPredictions.push(prediction);
         await queueService.addLocalProcessingJob({ kind: 'local', predictionId: prediction.id });
       }
+      await finalizeGenerationReservation(generationReservation, 0);
 
       const primaryPrediction = submittedPredictions[0];
       res.status(202).json({
@@ -706,29 +727,6 @@ router.post('/generate', authMiddleware, requireScope('generation:write'), rateL
     const submittedPredictions = [];
     let acceptedCredits = 0;
     let acceptedVariations = 0;
-
-    // Reserve the full quote atomically before starting any paid provider work.
-    // The conditional UPDATE prevents concurrent requests from spending the
-    // same remaining balance.
-    const reserved = await prisma.$executeRaw`
-      UPDATE users
-      SET credits_used = credits_used + ${billingQuote.totalCredits}
-      WHERE id = ${user.id}
-        AND credits_used + ${billingQuote.totalCredits} <= credits_limit
-    `;
-    if (reserved !== 1) {
-      const account = await prisma.user.findUnique({
-        where: { id: user.id },
-        select: { creditsUsed: true, creditsLimit: true },
-      });
-      const remainingCredits = account ? account.creditsLimit - account.creditsUsed : 0;
-      res.status(403).json({
-        error: 'Generation quota exceeded. Please upgrade plan.',
-        credits_required: billingQuote.totalCredits,
-        credits_remaining: Math.max(0, remainingCredits),
-      });
-      return;
-    }
 
     try {
       for (let variationIndex = 0; variationIndex < billingQuote.variationCount; variationIndex++) {
@@ -805,12 +803,9 @@ router.post('/generate', authMiddleware, requireScope('generation:write'), rateL
       }
     } catch (error) {
       const refundCredits = billingQuote.totalCredits - acceptedCredits;
+      await refundUnacceptedCredits(user.id, generationReservation.isFree, refundCredits);
+      await finalizeGenerationReservation(generationReservation, acceptedCredits);
       await prisma.$transaction([
-        ...(refundCredits > 0 ? [prisma.$executeRaw`
-          UPDATE users
-          SET credits_used = GREATEST(0, credits_used - ${refundCredits})
-          WHERE id = ${user.id}
-        `] : []),
         ...(acceptedCredits > 0 ? [prisma.usageEvent.create({
           data: {
             userId: user.id,
@@ -830,6 +825,8 @@ router.post('/generate', authMiddleware, requireScope('generation:write'), rateL
       ]);
       throw error;
     }
+
+    await finalizeGenerationReservation(generationReservation, billingQuote.totalCredits);
 
     await prisma.usageEvent.create({
         data: {
@@ -863,6 +860,10 @@ router.post('/generate', authMiddleware, requireScope('generation:write'), rateL
       })),
     });
   } catch (error) {
+    if (error instanceof GenerationGateError) {
+      res.status(error.status).json({ error: error.message, code: error.code, ...error.details });
+      return;
+    }
     console.error('Submit prediction error:', error);
     res.status(500).json({ error: 'Failed submitting generation job' });
   }
