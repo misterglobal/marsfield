@@ -46,6 +46,7 @@ const rate_limit_middleware_1 = require("../middleware/rate-limit.middleware");
 const account_recovery_email_service_1 = require("../services/account-recovery-email.service");
 const account_verification_email_service_1 = require("../services/account-verification-email.service");
 const captcha_service_1 = require("../services/captcha.service");
+const signup_policy_service_1 = require("../services/signup-policy.service");
 const free_tier_risk_service_1 = require("../services/free-tier-risk.service");
 const router = (0, express_1.Router)();
 const prisma = new client_1.PrismaClient();
@@ -107,24 +108,32 @@ async function deliverVerificationEmail(user) {
         throw new Error(result.error || 'Could not send verification email');
 }
 // POST /api/v1/auth/register
-router.post('/register', (0, rate_limit_middleware_1.publicRateLimit)('register', 5, (req) => typeof req.body?.email === 'string' ? req.body.email : undefined), async (req, res) => {
+router.post('/register', (0, rate_limit_middleware_1.publicRateLimit)('register', 5, (req) => typeof req.body?.email === 'string' ? req.body.email : undefined), (0, rate_limit_middleware_1.publicRateLimit)('register-hour', 5, undefined, 3600), (0, rate_limit_middleware_1.publicRateLimit)('register-day', 10, undefined, 86400), async (req, res) => {
     try {
         const { email, password, name } = req.body;
         // Input validation
-        if (!email || !password) {
+        if (typeof email !== 'string' || typeof password !== 'string' || !email.trim() || !password) {
             res.status(400).json({ error: 'Email and password are required' });
             return;
         }
-        if (password.length < 8) {
-            res.status(400).json({ error: 'Password must be at least 8 characters' });
+        if (password.length < 8 || password.length > 128) {
+            res.status(400).json({ error: 'Password must be between 8 and 128 characters' });
             return;
         }
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
             res.status(400).json({ error: 'Invalid email format' });
             return;
         }
+        if (email.length > 254 || (name != null && (typeof name !== 'string' || name.length > 200))) {
+            res.status(400).json({ error: 'Invalid registration details' });
+            return;
+        }
+        if ((0, signup_policy_service_1.isDisposableEmail)(email)) {
+            res.status(400).json({ error: 'Use a permanent email address to register.' });
+            return;
+        }
         await (0, captcha_service_1.verifyRegistrationCaptcha)(req.body?.captcha_token, req);
-        const normalizedEmail = email.toLowerCase();
+        const normalizedEmail = email.trim().toLowerCase();
         const existingUser = await prisma.user.findUnique({ where: { email: normalizedEmail } });
         if (existingUser) {
             res.status(400).json({ error: 'Email already registered' });
@@ -181,11 +190,11 @@ router.post('/register', (0, rate_limit_middleware_1.publicRateLimit)('register'
 router.post('/login', (0, rate_limit_middleware_1.publicRateLimit)('login', 10, (req) => typeof req.body?.email === 'string' ? req.body.email : undefined), async (req, res) => {
     try {
         const { email, password } = req.body;
-        if (!email || !password) {
+        if (typeof email !== 'string' || typeof password !== 'string' || !email.trim() || !password) {
             res.status(400).json({ error: 'Email and password are required' });
             return;
         }
-        const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+        const user = await prisma.user.findUnique({ where: { email: email.trim().toLowerCase() } });
         if (!user) {
             res.status(401).json({ error: 'Invalid credentials' });
             return;
@@ -211,7 +220,7 @@ router.post('/login', (0, rate_limit_middleware_1.publicRateLimit)('login', 10, 
 router.post('/forgot-password', (0, rate_limit_middleware_1.publicRateLimit)('forgot-password', 5, (req) => typeof req.body?.email === 'string' ? req.body.email : undefined), async (req, res) => {
     try {
         const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
-        const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+        const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
         const user = validEmail
             ? await prisma.user.findUnique({ where: { email }, select: { id: true, email: true, name: true } })
             : null;

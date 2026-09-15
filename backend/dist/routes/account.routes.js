@@ -81,14 +81,20 @@ router.get('/usage', auth_middleware_1.authMiddleware, async (req, res) => {
                 _min: { creditsLimit: true },
             });
             displayedCreditsUsed = grouped._sum.freeCreditsUsedLifetime || 0;
-            displayedCreditsLimit = Math.min(freshUser.creditsLimit, grouped._min.creditsLimit || freshUser.creditsLimit);
+            displayedCreditsLimit = Math.min(freshUser.creditsLimit, grouped._min.creditsLimit ?? freshUser.creditsLimit);
         }
+        const unlockedLimit = freshUser.plan !== 'free' ? displayedCreditsLimit
+            : !freshUser.emailVerifiedAt ? 0
+                : freshUser.phoneVerifiedAt ? displayedCreditsLimit : Math.min(displayedCreditsLimit, (0, free_tier_risk_service_1.emailTrialCredits)());
         res.json({
+            trial_total_credits: displayedCreditsLimit,
+            trial_credits_unlocked: unlockedLimit,
+            trial_credits_remaining: Math.max(0, unlockedLimit - displayedCreditsUsed),
             plan: freshUser.plan,
             credits_used: displayedCreditsUsed,
             free_credits_used_lifetime: freshUser.freeCreditsUsedLifetime,
-            credits_limit: displayedCreditsLimit,
-            credits_remaining: Math.max(0, displayedCreditsLimit - displayedCreditsUsed),
+            credits_limit: unlockedLimit,
+            credits_remaining: Math.max(0, unlockedLimit - displayedCreditsUsed),
             email_verified: Boolean(freshUser.emailVerifiedAt),
             phone_verified: Boolean(freshUser.phoneVerifiedAt),
             phone_last_four: freshUser.phoneLastFour,

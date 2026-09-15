@@ -222,6 +222,18 @@ export function assertGenerationPolicy(input: Omit<GenerationGateInput, 'req' | 
   }
 }
 
+export function emailTrialCredits(): number {
+  return Math.floor(numberEnv('FREE_TRIAL_EMAIL_CREDITS', 5));
+}
+
+export function assertTrialEscalation(groupUsed: number, credits: number, phoneVerified: boolean): void {
+  if (!phoneVerified && groupUsed + credits > emailTrialCredits()) {
+    throw new GenerationGateError('Verify your phone in Settings to unlock the remaining trial credits.', 403, 'phone_verification_required', {
+      verification_path: '/api/v1/account/phone/start',
+    });
+  }
+}
+
 function dollarsToMicros(name: string, fallback: number): bigint {
   return BigInt(Math.round(numberEnv(name, fallback) * 1_000_000));
 }
@@ -279,7 +291,8 @@ async function reserveInTransaction(input: GenerationGateInput, risk: RiskContex
          WHERE id IN (${Prisma.join(subjectIds)})
       `;
       const groupUsed = Number(lifetimeRows[0]?.used || 0n);
-      const groupLimit = Math.min(input.user.creditsLimit, lifetimeRows[0]?.limit || input.user.creditsLimit);
+      assertTrialEscalation(groupUsed, input.credits, Boolean(input.user.phoneVerifiedAt));
+      const groupLimit = Math.min(input.user.creditsLimit, lifetimeRows[0]?.limit ?? input.user.creditsLimit);
       if (groupUsed + input.credits > groupLimit) {
         throw new GenerationGateError('The free trial credit allowance has already been used by this account group.', 403, 'risk_group_quota_exceeded', {
           credits_required: input.credits,
@@ -346,7 +359,7 @@ export async function reserveGeneration(input: GenerationGateInput): Promise<Gen
   const risk = await getRiskContext(input.user.id);
   const riskThreshold = numberEnv('FREE_TRIAL_PHONE_RISK_THRESHOLD', 50);
   if (input.user.plan.toLowerCase() === 'free' && risk.score >= riskThreshold && !input.user.phoneVerifiedAt) {
-    throw new GenerationGateError('Additional phone verification is required for this free trial.', 403, 'phone_verification_required', {
+    throw new GenerationGateError('Verify your phone in Settings to continue this free trial.', 403, 'phone_verification_required', {
       verification_path: '/api/v1/account/phone/start',
     });
   }
