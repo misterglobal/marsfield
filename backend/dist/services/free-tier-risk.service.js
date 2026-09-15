@@ -10,6 +10,8 @@ exports.recordRegistrationSignals = recordRegistrationSignals;
 exports.recordGenerationSignals = recordGenerationSignals;
 exports.getRiskContext = getRiskContext;
 exports.assertGenerationPolicy = assertGenerationPolicy;
+exports.emailTrialCredits = emailTrialCredits;
+exports.assertTrialEscalation = assertTrialEscalation;
 exports.estimateCostMicros = estimateCostMicros;
 exports.reserveGeneration = reserveGeneration;
 exports.finalizeGenerationReservation = finalizeGenerationReservation;
@@ -179,6 +181,16 @@ function assertGenerationPolicy(input) {
         throw new GenerationGateError(`Free trial generations are limited to ${freeMaxDuration} seconds.`, 403, 'trial_duration_limit');
     }
 }
+function emailTrialCredits() {
+    return Math.floor(numberEnv('FREE_TRIAL_EMAIL_CREDITS', 5));
+}
+function assertTrialEscalation(groupUsed, credits, phoneVerified) {
+    if (!phoneVerified && groupUsed + credits > emailTrialCredits()) {
+        throw new GenerationGateError('Verify your phone in Settings to unlock the remaining trial credits.', 403, 'phone_verification_required', {
+            verification_path: '/api/v1/account/phone/start',
+        });
+    }
+}
 function dollarsToMicros(name, fallback) {
     return BigInt(Math.round(numberEnv(name, fallback) * 1_000_000));
 }
@@ -229,7 +241,8 @@ async function reserveInTransaction(input, risk) {
          WHERE id IN (${client_1.Prisma.join(subjectIds)})
       `;
             const groupUsed = Number(lifetimeRows[0]?.used || 0n);
-            const groupLimit = Math.min(input.user.creditsLimit, lifetimeRows[0]?.limit || input.user.creditsLimit);
+            assertTrialEscalation(groupUsed, input.credits, Boolean(input.user.phoneVerifiedAt));
+            const groupLimit = Math.min(input.user.creditsLimit, lifetimeRows[0]?.limit ?? input.user.creditsLimit);
             if (groupUsed + input.credits > groupLimit) {
                 throw new GenerationGateError('The free trial credit allowance has already been used by this account group.', 403, 'risk_group_quota_exceeded', {
                     credits_required: input.credits,
@@ -290,7 +303,7 @@ async function reserveGeneration(input) {
     const risk = await getRiskContext(input.user.id);
     const riskThreshold = numberEnv('FREE_TRIAL_PHONE_RISK_THRESHOLD', 50);
     if (input.user.plan.toLowerCase() === 'free' && risk.score >= riskThreshold && !input.user.phoneVerifiedAt) {
-        throw new GenerationGateError('Additional phone verification is required for this free trial.', 403, 'phone_verification_required', {
+        throw new GenerationGateError('Verify your phone in Settings to continue this free trial.', 403, 'phone_verification_required', {
             verification_path: '/api/v1/account/phone/start',
         });
     }

@@ -4,7 +4,7 @@ import { randomBytes, createHash } from 'crypto';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.middleware';
 import { buildFreemiusCheckoutUrl, getPlan, PLAN_CONFIG, PlanTier, serializePlan } from '../services/freemius.service';
 import { checkPhoneVerification, normalizePhone, startPhoneVerification } from '../services/phone-verification.service';
-import { getRiskContext, recordRiskSignal } from '../services/free-tier-risk.service';
+import { emailTrialCredits, getRiskContext, recordRiskSignal } from '../services/free-tier-risk.service';
 import { rateLimit } from '../middleware/rate-limit.middleware';
 
 const router = Router();
@@ -86,15 +86,22 @@ router.get('/usage', authMiddleware, async (req: AuthenticatedRequest, res: Resp
         _min: { creditsLimit: true },
       });
       displayedCreditsUsed = grouped._sum.freeCreditsUsedLifetime || 0;
-      displayedCreditsLimit = Math.min(freshUser.creditsLimit, grouped._min.creditsLimit || freshUser.creditsLimit);
+      displayedCreditsLimit = Math.min(freshUser.creditsLimit, grouped._min.creditsLimit ?? freshUser.creditsLimit);
     }
 
+    const unlockedLimit = freshUser.plan !== 'free' ? displayedCreditsLimit
+      : !freshUser.emailVerifiedAt ? 0
+      : freshUser.phoneVerifiedAt ? displayedCreditsLimit : Math.min(displayedCreditsLimit, emailTrialCredits());
+
     res.json({
+      trial_total_credits: displayedCreditsLimit,
+      trial_credits_unlocked: unlockedLimit,
+      trial_credits_remaining: Math.max(0, unlockedLimit - displayedCreditsUsed),
       plan: freshUser.plan,
       credits_used: displayedCreditsUsed,
       free_credits_used_lifetime: freshUser.freeCreditsUsedLifetime,
-      credits_limit: displayedCreditsLimit,
-      credits_remaining: Math.max(0, displayedCreditsLimit - displayedCreditsUsed),
+      credits_limit: unlockedLimit,
+      credits_remaining: Math.max(0, unlockedLimit - displayedCreditsUsed),
       email_verified: Boolean(freshUser.emailVerifiedAt),
       phone_verified: Boolean(freshUser.phoneVerifiedAt),
       phone_last_four: freshUser.phoneLastFour,

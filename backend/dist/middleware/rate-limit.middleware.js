@@ -8,6 +8,7 @@ exports.rateLimit = rateLimit;
 exports.publicRateLimit = publicRateLimit;
 const crypto_1 = require("crypto");
 const ioredis_1 = __importDefault(require("ioredis"));
+const free_tier_risk_service_1 = require("../services/free-tier-risk.service");
 const WINDOW_SECONDS = 60;
 exports.WINDOW_SECONDS = WINDOW_SECONDS;
 const PLAN_LIMITS = {
@@ -30,11 +31,11 @@ const redis = redisUrl
 redis?.on('error', () => undefined);
 let warnedUnavailable = false;
 const localBuckets = new Map();
-function consumeLocally(keys) {
+function consumeLocally(keys, windowSeconds) {
     const now = Date.now();
-    const expiresAt = now + WINDOW_SECONDS * 1_000;
+    const expiresAt = now + windowSeconds * 1_000;
     let maximum = 0;
-    let latestExpiry = expiresAt;
+    let latestExpiry = now;
     for (const key of keys) {
         const current = localBuckets.get(key);
         const bucket = !current || current.expiresAt <= now
@@ -67,24 +68,24 @@ return {maximum, ttl}
 function limitFor(plan, bucket) {
     return (PLAN_LIMITS[String(plan || 'free').toLowerCase()] || PLAN_LIMITS.free)[bucket];
 }
-async function consume(keys) {
+async function consume(keys, windowSeconds = WINDOW_SECONDS) {
     if (!redis)
-        return consumeLocally(keys);
+        return process.env.NODE_ENV === 'production' ? null : consumeLocally(keys, windowSeconds);
     try {
         if (redis.status === 'wait')
             await redis.connect();
         if (redis.status !== 'ready')
-            return consumeLocally(keys);
-        const result = await redis.eval(CONSUME_SCRIPT, keys.length, ...keys, WINDOW_SECONDS);
+            return process.env.NODE_ENV === 'production' ? null : consumeLocally(keys, windowSeconds);
+        const result = await redis.eval(CONSUME_SCRIPT, keys.length, ...keys, windowSeconds);
         warnedUnavailable = false;
         return { count: Number(result[0]), ttl: Math.max(1, Number(result[1])) };
     }
     catch (error) {
         if (!warnedUnavailable) {
             warnedUnavailable = true;
-            console.warn('Redis rate limiting unavailable; using the per-process fallback until Redis recovers:', error instanceof Error ? error.message : error);
+            console.warn('Redis rate limiting unavailable:', error instanceof Error ? error.message : error);
         }
-        return consumeLocally(keys);
+        return process.env.NODE_ENV === 'production' ? null : consumeLocally(keys, windowSeconds);
     }
 }
 function rateLimit(bucket) {
@@ -101,7 +102,8 @@ function rateLimit(bucket) {
         }
         const usage = await consume(keys);
         if (!usage) {
-            next();
+            res.setHeader('Retry-After', '30');
+            res.status(503).json({ error: 'Request limiting is temporarily unavailable. Please try again later.' });
             return;
         }
         const remaining = Math.max(0, limit - usage.count);
@@ -119,19 +121,19 @@ function rateLimit(bucket) {
         next();
     };
 }
-function publicRateLimit(bucket, limit, identity) {
+function publicRateLimit(bucket, limit, identity, windowSeconds = WINDOW_SECONDS) {
     return async (req, res, next) => {
-        const forwarded = req.headers['x-forwarded-for'];
-        const ip = (Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(',')[0])?.trim() || req.ip || 'unknown';
+        const ip = (0, free_tier_risk_service_1.clientIp)(req) || 'unknown';
         const suppliedIdentity = identity?.(req);
         const digest = (value) => (0, crypto_1.createHash)('sha256').update(value).digest('hex');
-        const prefix = `marsfield:rate-limit:public:${bucket}`;
+        const prefix = `marsfield:rate-limit:public:${bucket}:${windowSeconds}`;
         const keys = [`${prefix}:ip:${digest(ip)}`];
         if (suppliedIdentity)
-            keys.push(`${prefix}:identity:${digest(suppliedIdentity.toLowerCase())}`);
-        const usage = await consume(keys);
+            keys.push(`${prefix}:identity:${digest(suppliedIdentity.trim().toLowerCase())}`);
+        const usage = await consume(keys, windowSeconds);
         if (!usage) {
-            next();
+            res.setHeader('Retry-After', '30');
+            res.status(503).json({ error: 'Request limiting is temporarily unavailable. Please try again later.' });
             return;
         }
         res.setHeader('RateLimit-Limit', String(limit));

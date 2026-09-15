@@ -8,6 +8,7 @@ import { publicRateLimit } from '../middleware/rate-limit.middleware';
 import { sendAccountRecoveryEmail } from '../services/account-recovery-email.service';
 import { sendAccountVerificationEmail } from '../services/account-verification-email.service';
 import { verifyRegistrationCaptcha } from '../services/captcha.service';
+import { isDisposableEmail } from '../services/signup-policy.service';
 import { recordRegistrationSignals } from '../services/free-tier-risk.service';
 
 const router = Router();
@@ -77,29 +78,40 @@ async function deliverVerificationEmail(user: { id: string; email: string; name:
 }
 
 // POST /api/v1/auth/register
-router.post('/register', publicRateLimit('register', 5, (req) => typeof req.body?.email === 'string' ? req.body.email : undefined), async (req, res) => {
+router.post('/register', publicRateLimit('register', 5, (req) => typeof req.body?.email === 'string' ? req.body.email : undefined),
+  publicRateLimit('register-hour', 5, undefined, 3600),
+  publicRateLimit('register-day', 10, undefined, 86400), async (req, res) => {
   try {
     const { email, password, name } = req.body;
     
     // Input validation
-    if (!email || !password) {
+    if (typeof email !== 'string' || typeof password !== 'string' || !email.trim() || !password) {
        res.status(400).json({ error: 'Email and password are required' });
        return;
     }
 
-    if (password.length < 8) {
-       res.status(400).json({ error: 'Password must be at least 8 characters' });
+    if (password.length < 8 || password.length > 128) {
+       res.status(400).json({ error: 'Password must be between 8 and 128 characters' });
        return;
     }
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
        res.status(400).json({ error: 'Invalid email format' });
        return;
     }
 
+    if (email.length > 254 || (name != null && (typeof name !== 'string' || name.length > 200))) {
+      res.status(400).json({ error: 'Invalid registration details' });
+      return;
+    }
+    if (isDisposableEmail(email)) {
+      res.status(400).json({ error: 'Use a permanent email address to register.' });
+      return;
+    }
+
     await verifyRegistrationCaptcha(req.body?.captcha_token, req);
 
-    const normalizedEmail = email.toLowerCase();
+    const normalizedEmail = email.trim().toLowerCase();
     const existingUser = await prisma.user.findUnique({ where: { email: normalizedEmail } });
     if (existingUser) {
        res.status(400).json({ error: 'Email already registered' });
@@ -157,12 +169,12 @@ router.post('/register', publicRateLimit('register', 5, (req) => typeof req.body
 router.post('/login', publicRateLimit('login', 10, (req) => typeof req.body?.email === 'string' ? req.body.email : undefined), async (req, res) => {
   try {
     const { email, password } = req.body;
-    if (!email || !password) {
+    if (typeof email !== 'string' || typeof password !== 'string' || !email.trim() || !password) {
        res.status(400).json({ error: 'Email and password are required' });
        return;
     }
 
-    const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+    const user = await prisma.user.findUnique({ where: { email: email.trim().toLowerCase() } });
     if (!user) {
        res.status(401).json({ error: 'Invalid credentials' });
        return;
@@ -194,7 +206,7 @@ router.post(
   async (req, res) => {
     try {
       const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
-      const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+      const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
       const user = validEmail
         ? await prisma.user.findUnique({ where: { email }, select: { id: true, email: true, name: true } })
         : null;
