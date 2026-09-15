@@ -219,6 +219,11 @@ export default function SettingsPage() {
           <p style={{ color: 'var(--foreground-muted)', fontSize: '0.85rem' }}>
             Email: {usage?.email_verified ? 'verified' : 'verification required'} · Phone: {usage?.phone_verified ? `verified ending in ${usage.phone_last_four}` : 'not verified'}
           </p>
+          {usage?.plan === 'free' && !usage.phone_verified && (
+            <p style={{ background: 'rgba(134,239,172,0.08)', border: '1px solid rgba(134,239,172,0.25)', padding: '0.75rem', borderRadius: '8px', color: '#86efac', fontSize: '0.85rem' }}>
+              Complete phone verification to unlock 10 additional free credits, bringing your trial allowance to 15 credits.
+            </p>
+          )}
           {!usage?.phone_verified && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem' }}>
               <input className="form-input" style={{ flex: '1 1 220px' }} value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="+14165551234" aria-label="Phone number" />
