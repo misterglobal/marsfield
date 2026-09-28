@@ -94,8 +94,10 @@ export default function ProjectsPage() {
     try {
       const data = await api.getProjects();
       setProjects(data);
-      if (!selectedProject && data[0]) {
-        setSelectedProject(await api.getProject(data[0].id));
+      if (!selectedProject) {
+        const requestedId = new URLSearchParams(window.location.search).get('project_id');
+        const projectId = requestedId || data[0]?.id;
+        if (projectId) setSelectedProject(await api.getProject(projectId));
       }
     } catch (err: any) {
       setError(err.message || 'Failed to load projects');
