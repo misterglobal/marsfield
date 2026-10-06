@@ -2,6 +2,8 @@ Marsfield — AI Video Generation Platform
 Overview
 A full-stack AI media generation app with a Next.js frontend and Express backend, letting users create videos/images via AI models (Replicate/Kling/Seedance) and manage generations in projects.
 
+Development automation and pull-request safety checks are documented in [`docs/DEVELOPMENT_LOOP.md`](docs/DEVELOPMENT_LOOP.md).
+
 ---
 
 Frontend — Next.js 16 (React 19)
