@@ -213,7 +213,8 @@ async function reserveInTransaction(input, risk) {
     const budgetDate = utcBudgetDate();
     const subjectIds = isFree ? risk.groupUserIds : [input.user.id];
     return prisma.$transaction(async (tx) => {
-        await tx.$queryRaw `SELECT pg_advisory_xact_lock(hashtext(${`generation:${subjectIds.join(':')}`}))`;
+        // The lock returns PostgreSQL void, which Prisma cannot deserialize as a row.
+        await tx.$executeRaw `SELECT pg_advisory_xact_lock(hashtext(${`generation:${subjectIds.join(':')}`}))`;
         const concurrencyRows = await tx.$queryRaw `
       SELECT (
         (SELECT COUNT(*) FROM predictions
