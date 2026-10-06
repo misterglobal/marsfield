@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { SESSION_EXPIRED_MESSAGE, dispatchSessionExpired } from './session';
+
 const API_BASE_URL = '/api/v1';
 
 export function getDeviceId(): string {
@@ -31,6 +34,10 @@ async function request(endpoint: string, options: RequestInit = {}) {
   });
 
   if (!response.ok) {
+    if (response.status === 401 && headers.Authorization) {
+      dispatchSessionExpired();
+      throw new Error(SESSION_EXPIRED_MESSAGE);
+    }
     const errorData = await response.json().catch(() => ({}));
     throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
   }

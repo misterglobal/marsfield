@@ -1,9 +1,17 @@
 'use client';
+/* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/set-state-in-effect */
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, useEffect, createContext, useContext, type FormEvent } from "react";
+import { useState, useEffect, useCallback, createContext, useContext, type FormEvent } from "react";
 import { api, getDeviceId } from "@/lib/api";
+import { SessionTimeout } from "@/components/SessionTimeout";
+import {
+  SESSION_ACTIVITY_KEY,
+  SESSION_END_REASON_KEY,
+  SESSION_EXPIRED_MESSAGE,
+  recordSessionActivity,
+} from "@/lib/session";
 import { Turnstile } from "@/components/Turnstile";
 import "./globals.css";
 
@@ -51,6 +59,7 @@ export default function RootLayout({
   const [registerName, setRegisterName] = useState('');
   const [captchaToken, setCaptchaToken] = useState('');
   const [loginError, setLoginError] = useState('');
+  const [sessionNotice, setSessionNotice] = useState('');
   const [recoveryMessage, setRecoveryMessage] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
@@ -70,6 +79,42 @@ export default function RootLayout({
     }
   }, []);
 
+  const clearAuthentication = useCallback((expired: boolean) => {
+    if (expired) {
+      localStorage.setItem(SESSION_END_REASON_KEY, 'expired');
+    } else {
+      localStorage.removeItem(SESSION_END_REASON_KEY);
+    }
+    localStorage.removeItem(SESSION_ACTIVITY_KEY);
+    localStorage.removeItem('user');
+    localStorage.removeItem('token');
+    setToken(null);
+    setUser(null);
+    setShowFeedback(false);
+    setSessionNotice(expired ? SESSION_EXPIRED_MESSAGE : '');
+    setShowLogin(expired);
+    if (expired) setAuthMode('login');
+  }, []);
+
+  const handleSessionExpired = useCallback(() => {
+    clearAuthentication(true);
+  }, [clearAuthentication]);
+
+  useEffect(() => {
+    const synchronizeAuthentication = (event: StorageEvent) => {
+      if (event.key !== 'token' || event.newValue) return;
+      const expired = localStorage.getItem(SESSION_END_REASON_KEY) === 'expired';
+      setToken(null);
+      setUser(null);
+      setShowFeedback(false);
+      setSessionNotice(expired ? SESSION_EXPIRED_MESSAGE : '');
+      setShowLogin(expired);
+      if (expired) setAuthMode('login');
+    };
+    window.addEventListener('storage', synchronizeAuthentication);
+    return () => window.removeEventListener('storage', synchronizeAuthentication);
+  }, []);
+
   const handleLogin = async (email: string, password: string) => {
     setLoginLoading(true);
     setLoginError('');
@@ -77,8 +122,11 @@ export default function RootLayout({
       const data = await api.login({ email, password });
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
+      localStorage.removeItem(SESSION_END_REASON_KEY);
+      recordSessionActivity();
       setToken(data.token);
       setUser(data.user);
+      setSessionNotice('');
       setShowLogin(false);
     } catch (err: any) {
       setLoginError(err.message || 'Login failed');
@@ -101,8 +149,11 @@ export default function RootLayout({
       if (data.token) {
         localStorage.setItem('token', data.token);
         localStorage.setItem('user', JSON.stringify(data.user));
+        localStorage.removeItem(SESSION_END_REASON_KEY);
+        recordSessionActivity();
         setToken(data.token);
         setUser(data.user);
+        setSessionNotice('');
         setShowLogin(false);
       } else {
         setRecoveryMessage(data.message || 'Check your email to verify your account.');
@@ -143,10 +194,7 @@ export default function RootLayout({
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    setToken(null);
-    setUser(null);
+    clearAuthentication(false);
   };
 
   const handleFeedbackSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -198,6 +246,7 @@ export default function RootLayout({
           <meta name="theme-color" content="#030303" />
         </head>
         <body>
+          {user && token && <SessionTimeout onExpire={handleSessionExpired} />}
           {/* Persistent Sidebar */}
           <aside className="sidebar">
             <div className="sidebar-logo">
@@ -457,6 +506,11 @@ export default function RootLayout({
                         Resend verification email
                       </button>
                     )}
+                  </div>
+                )}
+                {sessionNotice && (
+                  <div role="status" style={{ background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.35)", padding: "0.75rem", borderRadius: "8px", fontSize: "0.85rem", color: "#fcd34d" }}>
+                    {sessionNotice}
                   </div>
                 )}
                 {recoveryMessage && (
