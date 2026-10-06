@@ -1,0 +1,31 @@
+name: Feature request
+description: Propose a bounded MarsField feature for the automated development loop.
+title: "[Feature]: "
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: User outcome
+      description: What should a user be able to do when this is complete?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance checks
+      description: List the observable conditions the team will use to approve the feature.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: exclusions
+    attributes:
+      label: Out of scope
+      description: Note anything that must not change, especially billing, authentication, provider calls, or production data.
+  - type: textarea
+    id: notes
+    attributes:
+      label: Supporting notes
+      description: Add screenshots, links, or implementation context if useful. Do not include secrets.
