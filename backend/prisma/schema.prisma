@@ -15,6 +15,7 @@ model User {
   plan                    String                   @default("free")
   creditsUsed             Int                      @default(0) @map("credits_used")
   creditsLimit            Int                      @default(15) @map("credits_limit")
+  unlimitedCredits        Boolean                  @default(false) @map("unlimited_credits")
   freeCreditsUsedLifetime Int                      @default(0) @map("free_credits_used_lifetime")
   authVersion             Int                      @default(0) @map("auth_version")
   emailVerifiedAt         DateTime?                @default(now()) @map("email_verified_at")
