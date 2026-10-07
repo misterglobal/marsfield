@@ -7,7 +7,7 @@ Preserve the container networking settings currently required by the MarsField V
 ## Acceptance Criteria
 
 - The backend listens on all container interfaces so the frontend proxy and host health checks can reach it.
-- The backend uses the explicitly configured `DATABASE_URL` rather than synthesizing a potentially incorrect production fallback.
+- Compose fails fast unless an explicit `DATABASE_URL` is configured, rather than synthesizing a potentially incorrect production fallback.
 - No production credentials, environment files, data, or server-only deployment files are committed.
 
 ## Affected Components
