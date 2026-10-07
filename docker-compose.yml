@@ -41,7 +41,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3001
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-marsfield}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-marsfield}?schema=public}
+      DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       REPLICATE_API_TOKEN: ${REPLICATE_API_TOKEN:?Set REPLICATE_API_TOKEN in .env}
