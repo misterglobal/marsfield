@@ -54,7 +54,7 @@ app.get('/api/v1/health', (req, res) => {
 
 async function startServer(): Promise<void> {
   await initializeFreeTierRiskControls();
-  app.listen(PORT, () => {
+  app.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
     void queueService.resumeIncompleteJobs().catch((error) => {
       console.error('Failed to resume incomplete generation jobs:', error);
