@@ -19,8 +19,6 @@ export interface AuthenticatedRequest extends Request {
     email: string;
     plan: string;
     creditsUsed: number;
-    creditsLimit: number;
-    unlimitedCredits: boolean;
     freeCreditsUsedLifetime: number;
     emailVerifiedAt: Date | null;
     phoneVerifiedAt: Date | null;

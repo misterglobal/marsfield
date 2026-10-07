@@ -159,8 +159,6 @@ export interface GateUser {
   email: string;
   plan: string;
   creditsUsed: number;
-  creditsLimit: number;
-  unlimitedCredits: boolean;
   emailVerifiedAt?: Date | null;
   phoneVerifiedAt?: Date | null;
 }
@@ -297,11 +295,6 @@ async function reserveInTransaction(input: GenerationGateInput, risk: RiskContex
          WHERE id IN (${Prisma.join(subjectIds)})
       `;
       const groupUsed = Number(lifetimeRows[0]?.used || 0n);
-      if (hasCreditLimit(input.user)) {
-        assertTrialEscalation(groupUsed, input.credits, Boolean(input.user.phoneVerifiedAt));
-      }
-      const groupLimit = Math.min(input.user.creditsLimit, lifetimeRows[0]?.limit ?? input.user.creditsLimit);
-      if (hasCreditLimit(input.user) && groupUsed + input.credits > groupLimit) {
         throw new GenerationGateError('The free trial credit allowance has already been used by this account group.', 403, 'risk_group_quota_exceeded', {
           credits_required: input.credits,
           credits_remaining: Math.max(0, groupLimit - groupUsed),
@@ -312,20 +305,10 @@ async function reserveInTransaction(input: GenerationGateInput, risk: RiskContex
         data: { creditsUsed: { increment: input.credits }, freeCreditsUsedLifetime: { increment: input.credits } },
       });
     } else {
-      const updated = input.user.unlimitedCredits
-        ? await tx.$executeRaw`
-            UPDATE users SET credits_used = credits_used + ${input.credits}
-             WHERE id = ${input.user.id}
-          `
-        : await tx.$executeRaw`
-            UPDATE users SET credits_used = credits_used + ${input.credits}
-             WHERE id = ${input.user.id}
-               AND credits_used + ${input.credits} <= credits_limit
-          `;
       if (updated !== 1) {
         throw new GenerationGateError('Generation quota exceeded. Please upgrade plan.', 403, 'generation_quota_exceeded', {
           credits_required: input.credits,
-          credits_remaining: Math.max(0, input.user.creditsLimit - input.user.creditsUsed),
+          credits_remaining: Math.max(0, (input.user.creditsLimit ?? 0) - input.user.creditsUsed),
         });
       }
     }

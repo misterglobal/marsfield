@@ -87,24 +87,20 @@ router.get('/usage', authMiddleware, async (req: AuthenticatedRequest, res: Resp
         _min: { creditsLimit: true },
       });
       displayedCreditsUsed = grouped._sum.freeCreditsUsedLifetime || 0;
-      displayedCreditsLimit = Math.min(freshUser.creditsLimit, grouped._min.creditsLimit ?? freshUser.creditsLimit);
+      displayedCreditsLimit = Math.min(freshUser.creditsLimit ?? Infinity, (grouped._min.creditsLimit ?? freshUser.creditsLimit) ?? Infinity);
     }
 
     const unlockedLimit = freshUser.plan !== 'free' ? displayedCreditsLimit
       : !freshUser.emailVerifiedAt ? 0
-      : freshUser.phoneVerifiedAt ? displayedCreditsLimit : Math.min(displayedCreditsLimit, emailTrialCredits());
-    const creditsRemaining = Math.max(0, unlockedLimit - displayedCreditsUsed);
 
     res.json({
-      trial_total_credits: displayedCreditsLimit,
-      trial_credits_unlocked: unlockedLimit,
-      trial_credits_remaining: Math.max(0, unlockedLimit - displayedCreditsUsed),
+      trial_total_credits: displayedCreditsLimit ?? 0,
+      trial_credits_unlocked: unlockedLimit ?? 0,
+      trial_credits_remaining: Math.max(0, (unlockedLimit ?? 0) - displayedCreditsUsed),
       plan: freshUser.plan,
       credits_used: displayedCreditsUsed,
       credits_unlimited: freshUser.unlimitedCredits,
       free_credits_used_lifetime: freshUser.freeCreditsUsedLifetime,
-      credits_limit: unlockedLimit,
-      credits_remaining: creditsRemaining,
       email_verified: Boolean(freshUser.emailVerifiedAt),
       phone_verified: Boolean(freshUser.phoneVerifiedAt),
       phone_last_four: freshUser.phoneLastFour,

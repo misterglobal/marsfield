@@ -41,7 +41,6 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3001
-      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       REPLICATE_API_TOKEN: ${REPLICATE_API_TOKEN:?Set REPLICATE_API_TOKEN in .env}
