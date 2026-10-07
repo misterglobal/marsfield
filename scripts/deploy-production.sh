@@ -109,8 +109,20 @@ wait_for_health() {
   return 1
 }
 
+wait_for_url() {
+  local url=$1
+  local attempts=${2:-6}
+  for attempt in $(seq 1 "$attempts"); do
+    if curl --fail --silent --show-error --max-time 20 "$url" >/dev/null; then
+      return 0
+    fi
+    sleep 5
+  done
+  return 1
+}
+
 rollback() {
-  local deployment_exit_code=$?
+  local deployment_exit_code=${1:-1}
   local rollback_failed=0
   trap - ERR
   set +e
@@ -121,8 +133,8 @@ rollback() {
   "${COMPOSE[@]}" up -d --no-deps --force-recreate backend frontend || rollback_failed=1
   wait_for_health backend 60 || rollback_failed=1
   wait_for_health frontend 60 || rollback_failed=1
-  curl --fail --silent --show-error --max-time 15 http://127.0.0.1:3000/ >/dev/null || rollback_failed=1
-  curl --fail --silent --show-error --max-time 20 "$PUBLIC_HEALTH_URL" >/dev/null || rollback_failed=1
+  wait_for_url http://127.0.0.1:3000/ 6 || rollback_failed=1
+  wait_for_url "$PUBLIC_HEALTH_URL" 6 || rollback_failed=1
   if (( rollback_failed )); then
     echo "CRITICAL: automatic application rollback did not restore healthy production." >&2
     exit 70
@@ -130,9 +142,11 @@ rollback() {
   echo "The previous application release was restored and passed health checks." >&2
   exit "$deployment_exit_code"
 }
-trap rollback ERR
+trap 'rollback "$?"' ERR
 
+echo "Checking out production commit $TARGET_SHA."
 git checkout --detach "$TARGET_SHA" --quiet
+echo "Building backend and frontend images."
 "${COMPOSE[@]}" build backend frontend
 POST_BUILD_AVAILABLE_KB="$(df -Pk "$APP_DIR" | awk 'NR == 2 { print $4 }')"
 if (( POST_BUILD_AVAILABLE_KB < 5242880 )); then
@@ -145,8 +159,9 @@ wait_for_health backend 60
 "${COMPOSE[@]}" up -d --no-deps frontend
 wait_for_health frontend 60
 
-curl --fail --silent --show-error --max-time 15 http://127.0.0.1:3000/ >/dev/null
-curl --fail --silent --show-error --max-time 20 "$PUBLIC_HEALTH_URL" >/dev/null
+echo "Verifying local and public health endpoints."
+wait_for_url http://127.0.0.1:3000/ 6
+wait_for_url "$PUBLIC_HEALTH_URL" 6
 printf '%s\n' "$TARGET_SHA" > "$DEPLOY_STATE_DIR/current-release"
 printf '%s\n' "$PREVIOUS_SHA" > "$DEPLOY_STATE_DIR/previous-release"
 trap - ERR
