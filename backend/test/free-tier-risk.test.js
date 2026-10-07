@@ -6,13 +6,32 @@ const {
   assertGenerationPolicy,
   estimateCostMicros,
   GenerationGateError,
+  hasCreditLimit,
   hashRiskSignal,
 } = require('../dist/services/free-tier-risk.service.js');
 
 const verifiedFreeUser = {
   id: 'free-user', email: 'free@example.com', plan: 'free', creditsUsed: 0,
   creditsLimit: 15, emailVerifiedAt: new Date(), phoneVerifiedAt: null,
+  unlimitedCredits: false,
 };
+
+test('only the explicit entitlement removes the account credit ceiling', () => {
+  assert.equal(hasCreditLimit(verifiedFreeUser), true);
+  assert.equal(hasCreditLimit({ ...verifiedFreeUser, unlimitedCredits: true }), false);
+});
+
+test('unlimited credits do not bypass plan or platform safety policy', () => {
+  const unlimitedFreeUser = { ...verifiedFreeUser, unlimitedCredits: true };
+  assert.throws(
+    () => assertGenerationPolicy({ user: unlimitedFreeUser, workflow: 'video-enhance', model: 'model', params: { duration: 5 }, credits: 1, variationCount: 1 }),
+    (error) => error.code === 'paid_feature_required',
+  );
+  assert.throws(
+    () => assertGenerationPolicy({ user: { ...unlimitedFreeUser, plan: 'pro' }, workflow: 'text-to-video', model: 'model', params: { duration: 181 }, credits: 1, variationCount: 1 }),
+    (error) => error.code === 'duration_limit',
+  );
+});
 
 test('free policy requires verified email', () => {
   assert.throws(

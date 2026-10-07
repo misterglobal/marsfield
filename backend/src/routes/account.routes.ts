@@ -39,6 +39,7 @@ router.get('/usage', authMiddleware, async (req: AuthenticatedRequest, res: Resp
           plan: true,
           creditsUsed: true,
           creditsLimit: true,
+          unlimitedCredits: true,
           freeCreditsUsedLifetime: true,
           emailVerifiedAt: true,
           phoneVerifiedAt: true,
@@ -78,7 +79,7 @@ router.get('/usage', authMiddleware, async (req: AuthenticatedRequest, res: Resp
 
     let displayedCreditsUsed = freshUser.plan === 'free' ? freshUser.freeCreditsUsedLifetime : freshUser.creditsUsed;
     let displayedCreditsLimit = freshUser.creditsLimit;
-    if (freshUser.plan === 'free') {
+    if (freshUser.plan === 'free' && !freshUser.unlimitedCredits) {
       const risk = await getRiskContext(user.id);
       const grouped = await prisma.user.aggregate({
         where: { id: { in: risk.groupUserIds } },
@@ -92,6 +93,7 @@ router.get('/usage', authMiddleware, async (req: AuthenticatedRequest, res: Resp
     const unlockedLimit = freshUser.plan !== 'free' ? displayedCreditsLimit
       : !freshUser.emailVerifiedAt ? 0
       : freshUser.phoneVerifiedAt ? displayedCreditsLimit : Math.min(displayedCreditsLimit, emailTrialCredits());
+    const creditsRemaining = Math.max(0, unlockedLimit - displayedCreditsUsed);
 
     res.json({
       trial_total_credits: displayedCreditsLimit,
@@ -99,9 +101,10 @@ router.get('/usage', authMiddleware, async (req: AuthenticatedRequest, res: Resp
       trial_credits_remaining: Math.max(0, unlockedLimit - displayedCreditsUsed),
       plan: freshUser.plan,
       credits_used: displayedCreditsUsed,
+      credits_unlimited: freshUser.unlimitedCredits,
       free_credits_used_lifetime: freshUser.freeCreditsUsedLifetime,
       credits_limit: unlockedLimit,
-      credits_remaining: Math.max(0, unlockedLimit - displayedCreditsUsed),
+      credits_remaining: creditsRemaining,
       email_verified: Boolean(freshUser.emailVerifiedAt),
       phone_verified: Boolean(freshUser.phoneVerifiedAt),
       phone_last_four: freshUser.phoneLastFour,

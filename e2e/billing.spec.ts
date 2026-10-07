@@ -20,6 +20,21 @@ test('shows transparent credit charges in account history', async ({ page }) => 
   await expect(page.getByText(/text-to-image.*google\/nano-banana-pro.*3 variations/)).toBeVisible();
 });
 
+test('labels an explicitly unlimited account without hiding usage', async ({ page }) => {
+  await authenticate(page);
+  await mockApi(page, {
+    'GET /api/v1/account/usage': {
+      plan: 'pro', credits_used: 1205, credits_unlimited: true, credits_limit: 1200, credits_remaining: 0,
+      storage_usage_bytes: 1024, storage_limit_bytes: '53687091200', project_count: 2, asset_count: 5,
+      recent_usage: [],
+    },
+  });
+
+  await page.goto('/settings');
+  await expect(page.getByText('Unlimited')).toBeVisible();
+  await expect(page.getByText('Used 1205 credits.')).toBeVisible();
+});
+
 test('updates Nano Banana Pro estimates for resolution and variations', async ({ page }) => {
   await authenticate(page);
   await mockApi(page);

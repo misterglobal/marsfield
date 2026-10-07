@@ -27,9 +27,14 @@ const API_SCOPES = [
   ['projects:write', 'Create projects and scenes'],
 ] as const;
 
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
 interface UsageSummary {
   plan: string;
   credits_used: number;
+  credits_unlimited: boolean;
   credits_limit: number;
   credits_remaining: number;
   email_verified?: boolean;
@@ -94,15 +99,16 @@ export default function SettingsPage() {
       setUsage(usageData);
       setApiKeys(keysData);
       setPlans(plansData);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load settings');
+    } catch (error: unknown) {
+      setError(errorMessage(error, 'Failed to load settings'));
     } finally {
       setLoading(false);
     }
   }, [token]);
 
   useEffect(() => {
-    void loadSettings();
+    const timeout = window.setTimeout(() => void loadSettings(), 0);
+    return () => window.clearTimeout(timeout);
   }, [loadSettings]);
 
   const handleGenerateKey = async (event: React.FormEvent) => {
@@ -120,8 +126,8 @@ export default function SettingsPage() {
       setNewlyCreatedKey(created.key);
       setNewKeyName('');
       await loadSettings();
-    } catch (err: any) {
-      setError(err.message || 'Failed to create API key');
+    } catch (error: unknown) {
+      setError(errorMessage(error, 'Failed to create API key'));
     }
   };
 
@@ -131,8 +137,8 @@ export default function SettingsPage() {
     try {
       await api.deleteApiKey(id);
       await loadSettings();
-    } catch (err: any) {
-      setError(err.message || 'Failed to revoke API key');
+    } catch (error: unknown) {
+      setError(errorMessage(error, 'Failed to revoke API key'));
     }
   };
 
@@ -141,9 +147,9 @@ export default function SettingsPage() {
     setCheckoutTier(tier);
     try {
       const checkout = await api.createCheckout({ tier });
-      window.location.href = checkout.checkout_url;
-    } catch (err: any) {
-      setError(err.message || 'Failed to start checkout');
+      window.location.assign(checkout.checkout_url);
+    } catch (error: unknown) {
+      setError(errorMessage(error, 'Failed to start checkout'));
       setCheckoutTier('');
     }
   };
@@ -155,8 +161,8 @@ export default function SettingsPage() {
       const result = await api.startPhoneVerification(phone);
       setPhoneCodeSent(true);
       setPhoneStatus(result.message);
-    } catch (err: any) {
-      setError(err.message || 'Could not send a verification code');
+    } catch (error: unknown) {
+      setError(errorMessage(error, 'Could not send a verification code'));
     }
   };
 
@@ -168,8 +174,8 @@ export default function SettingsPage() {
       setPhoneCodeSent(false);
       setPhoneCode('');
       await loadSettings();
-    } catch (err: any) {
-      setError(err.message || 'Could not verify the phone number');
+    } catch (error: unknown) {
+      setError(errorMessage(error, 'Could not verify the phone number'));
     }
   };
 
@@ -181,7 +187,9 @@ export default function SettingsPage() {
     );
   }
 
-  const usedPercent = usage ? Math.min(100, Math.round((usage.credits_used / Math.max(1, usage.credits_limit)) * 100)) : 0;
+  const usedPercent = usage && !usage.credits_unlimited
+    ? Math.min(100, Math.round((usage.credits_used / Math.max(1, usage.credits_limit)) * 100))
+    : 0;
   const storageLimitBytes = Number(usage?.storage_limit_bytes || 0);
   const storageUsedBytes = usage?.storage_usage_bytes || 0;
   const storageUsedPercent = storageLimitBytes ? Math.min(100, Math.round((storageUsedBytes / storageLimitBytes) * 100)) : 0;
@@ -400,10 +408,10 @@ export default function SettingsPage() {
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--foreground-muted)', marginBottom: '0.5rem' }}>
             <span>Credits Remaining</span>
-            <strong>{usage?.credits_remaining ?? 0} / {usage?.credits_limit ?? 0}</strong>
+            <strong>{usage?.credits_unlimited ? 'Unlimited' : `${usage?.credits_remaining ?? 0} / ${usage?.credits_limit ?? 0}`}</strong>
           </div>
           <div style={{ background: 'rgba(255,255,255,0.05)', height: '6px', borderRadius: '3px', overflow: 'hidden' }}>
-            <div style={{ width: `${100 - usedPercent}%`, height: '100%', background: 'var(--accent-gradient)', borderRadius: '3px' }}></div>
+            <div style={{ width: `${usage?.credits_unlimited ? 100 : 100 - usedPercent}%`, height: '100%', background: 'var(--accent-gradient)', borderRadius: '3px' }}></div>
           </div>
           <p style={{ color: 'var(--foreground-muted)', fontSize: '0.75rem' }}>
             Used {usage?.credits_used ?? 0} credits.
