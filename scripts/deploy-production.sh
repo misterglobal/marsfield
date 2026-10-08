@@ -99,6 +99,7 @@ wait_for_health() {
   local service=$1
   local attempts=${2:-60}
   local container
+  local diagnostics
   for attempt in $(seq 1 "$attempts"); do
     container="$("${COMPOSE[@]}" ps -q "$service")"
     if [[ -n "$container" ]] && [[ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container")" == "healthy" ]]; then
@@ -106,6 +107,18 @@ wait_for_health() {
     fi
     sleep 2
   done
+  container="$("${COMPOSE[@]}" ps -q "$service")"
+  diagnostics="$DEPLOY_STATE_DIR/failure-${DEPLOY_ID}-${service}.log"
+  {
+    date -u
+    "${COMPOSE[@]}" ps "$service"
+    if [[ -n "$container" ]]; then
+      docker inspect --format '{{json .State}}' "$container"
+      docker logs --tail 200 "$container"
+    fi
+  } > "$diagnostics" 2>&1 || true
+  chmod 600 "$diagnostics" || true
+  echo "$service did not become healthy; private diagnostics saved to $diagnostics." >&2
   return 1
 }
 
