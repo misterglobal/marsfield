@@ -1,12 +1,12 @@
-# Production-compatible credit limits
+# Compatible nullable credit limits
 
 ## User outcome
 
-Production deployments preserve explicitly unlimited administrative test accounts without weakening credit enforcement for other users.
+Deployments preserve nullable legacy credit-limit data without weakening credit enforcement.
 
 ## Acceptance checks
 
-- The Prisma user model accepts the existing nullable `credits_limit` production value.
+- The Prisma user model accepts nullable legacy `credits_limit` values.
 - Only `unlimitedCredits=true` removes the account credit ceiling.
 - A limited account with a missing numeric limit fails closed at zero credits.
 - Account usage remains compatible with the existing `credits_unlimited` frontend behavior.
