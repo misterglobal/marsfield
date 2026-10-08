@@ -11,6 +11,11 @@ on:
         description: Type DEPLOY to confirm the production deployment
         required: true
         type: string
+      schema_confirmation:
+        description: Type MIGRATE only when the reviewed commit changes the Prisma schema
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -24,6 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       commit_sha: ${{ steps.commit.outputs.sha }}
+      schema_confirmation: ${{ steps.commit.outputs.schema_confirmation }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -33,14 +39,17 @@ jobs:
         env:
           REQUESTED_SHA: ${{ inputs.commit_sha }}
           CONFIRMATION: ${{ inputs.confirmation }}
+          SCHEMA_CONFIRMATION: ${{ inputs.schema_confirmation }}
         run: |
           set -euo pipefail
           test "$CONFIRMATION" = "DEPLOY"
+          test -z "$SCHEMA_CONFIRMATION" || test "$SCHEMA_CONFIRMATION" = "MIGRATE"
           [[ "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]]
           git fetch origin main
           test "$(git rev-parse "${REQUESTED_SHA}^{commit}")" = "$REQUESTED_SHA"
           test "$REQUESTED_SHA" = "$(git rev-parse origin/main)"
           echo "sha=$REQUESTED_SHA" >> "$GITHUB_OUTPUT"
+          echo "schema_confirmation=$SCHEMA_CONFIRMATION" >> "$GITHUB_OUTPUT"
 
   deploy:
     needs: validate
@@ -68,6 +77,7 @@ jobs:
           SSH_PORT: ${{ secrets.MARSFIELD_SSH_PORT }}
           SSH_USER: ${{ secrets.MARSFIELD_SSH_USER }}
           TARGET_SHA: ${{ needs.validate.outputs.commit_sha }}
+          SCHEMA_CONFIRMATION: ${{ needs.validate.outputs.schema_confirmation }}
           PUBLIC_HEALTH_URL: ${{ vars.MARSFIELD_PUBLIC_HEALTH_URL }}
         run: |
           set -euo pipefail
@@ -80,8 +90,8 @@ jobs:
             -o StrictHostKeyChecking=yes \
             scripts/deploy-production.sh \
             "$SSH_USER@$SSH_HOST:$REMOTE_SCRIPT"
-          printf -v REMOTE_COMMAND 'bash %q %q %q; status=$?; rm -f %q; exit $status' \
-            "$REMOTE_SCRIPT" "$TARGET_SHA" "$PUBLIC_HEALTH_URL" "$REMOTE_SCRIPT"
+          printf -v REMOTE_COMMAND 'bash %q %q %q %q; status=$?; rm -f %q; exit $status' \
+            "$REMOTE_SCRIPT" "$TARGET_SHA" "$PUBLIC_HEALTH_URL" "$SCHEMA_CONFIRMATION" "$REMOTE_SCRIPT"
           ssh -p "$SSH_PORT" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
