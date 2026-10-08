@@ -121,6 +121,12 @@ wait_for_url() {
   return 1
 }
 
+recreate_service() {
+  local service=$1
+  "${COMPOSE[@]}" rm -sf "$service"
+  "${COMPOSE[@]}" up -d --no-deps "$service"
+}
+
 rollback() {
   local deployment_exit_code=${1:-1}
   local rollback_failed=0
@@ -130,7 +136,8 @@ rollback() {
   git checkout --detach "$PREVIOUS_SHA" --quiet || rollback_failed=1
   docker tag "$BACKEND_ROLLBACK_REF" "$BACKEND_IMAGE_REF" || rollback_failed=1
   docker tag "$FRONTEND_ROLLBACK_REF" "$FRONTEND_IMAGE_REF" || rollback_failed=1
-  "${COMPOSE[@]}" up -d --no-deps --force-recreate backend frontend || rollback_failed=1
+  recreate_service backend || rollback_failed=1
+  recreate_service frontend || rollback_failed=1
   wait_for_health backend 60 || rollback_failed=1
   wait_for_health frontend 60 || rollback_failed=1
   wait_for_url http://127.0.0.1:3000/ 6 || rollback_failed=1
@@ -153,10 +160,10 @@ if (( POST_BUILD_AVAILABLE_KB < 5242880 )); then
   echo "Build left less than 5 GiB free; refusing to replace running containers." >&2
   false
 fi
-"${COMPOSE[@]}" up -d --no-deps backend
+recreate_service backend
 wait_for_health backend 60
 
-"${COMPOSE[@]}" up -d --no-deps frontend
+recreate_service frontend
 wait_for_health frontend 60
 
 echo "Verifying local and public health endpoints."
