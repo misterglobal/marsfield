@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 TARGET_SHA="${1:-}"
 PUBLIC_HEALTH_URL="${2:-}"
+SCHEMA_CONFIRMATION="${3:-}"
 APP_DIR="${MARSFIELD_APP_DIR:-/root/marsfield/marsfield}"
 BACKUP_DIR="${MARSFIELD_BACKUP_DIR:-/root/marsfield-backups}"
 MIN_FREE_KB="${MARSFIELD_MIN_FREE_KB:-12582912}"
@@ -14,6 +15,10 @@ if [[ ! "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]; then
 fi
 if [[ ! "$PUBLIC_HEALTH_URL" =~ ^https:// ]]; then
   echo "An HTTPS public health URL is required." >&2
+  exit 2
+fi
+if [[ -n "$SCHEMA_CONFIRMATION" && "$SCHEMA_CONFIRMATION" != "MIGRATE" ]]; then
+  echo "Schema confirmation must be empty or MIGRATE." >&2
   exit 2
 fi
 
@@ -71,8 +76,11 @@ fi
 
 PREVIOUS_SHA="$(git rev-parse HEAD)"
 if ! git diff --quiet "$PREVIOUS_SHA" "$TARGET_SHA" -- backend/prisma/schema.prisma; then
-  echo "Automated deployment refuses Prisma schema changes; use a separately reviewed migration procedure." >&2
-  exit 2
+  if [[ "$SCHEMA_CONFIRMATION" != "MIGRATE" ]]; then
+    echo "Prisma schema changes require a separately reviewed deployment confirmed with MIGRATE." >&2
+    exit 2
+  fi
+  echo "Reviewed Prisma schema change explicitly authorized."
 fi
 BACKEND_IMAGE_ID="$(docker inspect --format '{{.Image}}' "$BACKEND_CONTAINER")"
 FRONTEND_IMAGE_ID="$(docker inspect --format '{{.Image}}' "$FRONTEND_CONTAINER")"
