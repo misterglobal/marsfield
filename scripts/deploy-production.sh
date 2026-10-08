@@ -8,6 +8,8 @@ APP_DIR="${MARSFIELD_APP_DIR:-/root/marsfield/marsfield}"
 BACKUP_DIR="${MARSFIELD_BACKUP_DIR:-/root/marsfield-backups}"
 MIN_FREE_KB="${MARSFIELD_MIN_FREE_KB:-12582912}"
 DEPLOY_STATE_DIR="${MARSFIELD_DEPLOY_STATE_DIR:-/root/marsfield-server}"
+export COMPOSE_PROJECT_NAME="${MARSFIELD_COMPOSE_PROJECT_NAME:-marsfield}"
+export COMPOSE_COMPATIBILITY="${MARSFIELD_COMPOSE_COMPATIBILITY:-1}"
 
 if [[ ! "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]; then
   echo "A full 40-character commit SHA is required." >&2
