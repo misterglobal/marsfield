@@ -29,8 +29,8 @@ The VPS script:
 3. Retains one prior pair of application images and tags the currently running backend and frontend images for rollback.
 4. Creates a private PostgreSQL custom-format backup, validates its archive listing, and writes a SHA-256 checksum under `/root/marsfield-backups`.
 5. Checks out the exact source commit in detached-head mode and builds it from the server's installed base images. It verifies at least 5 GiB remains after the build before replacing a running container.
-6. Replaces and health-checks the backend before replacing the frontend, then checks both localhost and the public HTTPS path.
-7. Restores the previous source commit and application images automatically if a deployment command or health check fails, then verifies the restored backend, frontend, localhost, and public HTTPS path. A failed rollback is reported as a critical error.
+6. Replaces and health-checks the backend before replacing the frontend, then checks both localhost and the public HTTPS path with bounded retries for transient network failures.
+7. Restores the previous source commit and application images automatically if a deployment command or health check fails, then verifies the restored backend, frontend, localhost, and public HTTPS path. The original failure status is preserved, and a failed rollback is reported as a critical error.
 8. Records the current and previous commit under `/root/marsfield-server`, removes dangling images, and retains the ten newest deployment backups.
 
 Database rollback is intentionally not automatic. Automated releases therefore reject Prisma schema changes, and each release backup remains available for a separately approved recovery operation.
