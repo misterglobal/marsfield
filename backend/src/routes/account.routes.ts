@@ -78,7 +78,7 @@ router.get('/usage', authMiddleware, async (req: AuthenticatedRequest, res: Resp
     }
 
     let displayedCreditsUsed = freshUser.plan === 'free' ? freshUser.freeCreditsUsedLifetime : freshUser.creditsUsed;
-    let displayedCreditsLimit = freshUser.creditsLimit;
+    let displayedCreditsLimit = freshUser.creditsLimit ?? 0;
     if (freshUser.plan === 'free' && !freshUser.unlimitedCredits) {
       const risk = await getRiskContext(user.id);
       const grouped = await prisma.user.aggregate({
@@ -87,7 +87,7 @@ router.get('/usage', authMiddleware, async (req: AuthenticatedRequest, res: Resp
         _min: { creditsLimit: true },
       });
       displayedCreditsUsed = grouped._sum.freeCreditsUsedLifetime || 0;
-      displayedCreditsLimit = Math.min(freshUser.creditsLimit, grouped._min.creditsLimit ?? freshUser.creditsLimit);
+      displayedCreditsLimit = Math.min(displayedCreditsLimit, grouped._min.creditsLimit ?? displayedCreditsLimit);
     }
 
     const unlockedLimit = freshUser.plan !== 'free' ? displayedCreditsLimit

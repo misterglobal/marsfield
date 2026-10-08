@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 process.env.JWT_SECRET ||= 'test-secret-with-more-than-thirty-two-characters';
 const {
   assertGenerationPolicy,
+  creditLimitOrZero,
   estimateCostMicros,
   GenerationGateError,
   hasCreditLimit,
@@ -19,6 +20,13 @@ const verifiedFreeUser = {
 test('only the explicit entitlement removes the account credit ceiling', () => {
   assert.equal(hasCreditLimit(verifiedFreeUser), true);
   assert.equal(hasCreditLimit({ ...verifiedFreeUser, unlimitedCredits: true }), false);
+  assert.equal(hasCreditLimit({ ...verifiedFreeUser, creditsLimit: null }), true);
+  assert.equal(hasCreditLimit({ ...verifiedFreeUser, creditsLimit: null, unlimitedCredits: true }), false);
+});
+
+test('missing numeric limits fail closed for accounts without the entitlement', () => {
+  assert.equal(creditLimitOrZero(verifiedFreeUser), 15);
+  assert.equal(creditLimitOrZero({ ...verifiedFreeUser, creditsLimit: null }), 0);
 });
 
 test('unlimited credits do not bypass plan or platform safety policy', () => {

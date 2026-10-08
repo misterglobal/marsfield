@@ -159,7 +159,7 @@ export interface GateUser {
   email: string;
   plan: string;
   creditsUsed: number;
-  creditsLimit: number;
+  creditsLimit: number | null;
   unlimitedCredits: boolean;
   emailVerifiedAt?: Date | null;
   phoneVerifiedAt?: Date | null;
@@ -186,6 +186,10 @@ export interface GenerationReservation {
 
 export function hasCreditLimit(user: Pick<GateUser, 'unlimitedCredits'>): boolean {
   return !user.unlimitedCredits;
+}
+
+export function creditLimitOrZero(user: Pick<GateUser, 'creditsLimit'>): number {
+  return user.creditsLimit ?? 0;
 }
 
 function effectiveDuration(params: Record<string, unknown> | undefined): number | undefined {
@@ -300,7 +304,8 @@ async function reserveInTransaction(input: GenerationGateInput, risk: RiskContex
       if (hasCreditLimit(input.user)) {
         assertTrialEscalation(groupUsed, input.credits, Boolean(input.user.phoneVerifiedAt));
       }
-      const groupLimit = Math.min(input.user.creditsLimit, lifetimeRows[0]?.limit ?? input.user.creditsLimit);
+      const userLimit = creditLimitOrZero(input.user);
+      const groupLimit = Math.min(userLimit, lifetimeRows[0]?.limit ?? userLimit);
       if (hasCreditLimit(input.user) && groupUsed + input.credits > groupLimit) {
         throw new GenerationGateError('The free trial credit allowance has already been used by this account group.', 403, 'risk_group_quota_exceeded', {
           credits_required: input.credits,
@@ -325,7 +330,7 @@ async function reserveInTransaction(input: GenerationGateInput, risk: RiskContex
       if (updated !== 1) {
         throw new GenerationGateError('Generation quota exceeded. Please upgrade plan.', 403, 'generation_quota_exceeded', {
           credits_required: input.credits,
-          credits_remaining: Math.max(0, input.user.creditsLimit - input.user.creditsUsed),
+          credits_remaining: Math.max(0, creditLimitOrZero(input.user) - input.user.creditsUsed),
         });
       }
     }
