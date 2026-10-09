@@ -1,0 +1,57 @@
+name: MarsField production maintenance
+
+on:
+  schedule:
+    - cron: "0 8 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marsfield-production
+  cancel-in-progress: false
+
+jobs:
+  maintain:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.MARSFIELD_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.MARSFIELD_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+      - name: Check and safely maintain production
+        env:
+          SSH_HOST: ${{ secrets.MARSFIELD_SSH_HOST }}
+          SSH_PORT: ${{ secrets.MARSFIELD_SSH_PORT }}
+          SSH_USER: ${{ secrets.MARSFIELD_SSH_USER }}
+          PUBLIC_HEALTH_URL: ${{ vars.MARSFIELD_PUBLIC_HEALTH_URL }}
+        run: |
+          set -euo pipefail
+          test -n "$PUBLIC_HEALTH_URL"
+          [[ "$PUBLIC_HEALTH_URL" =~ ^https://[A-Za-z0-9._~:/?#@%+=,\&-]+$ ]]
+          REMOTE_SCRIPT="/tmp/marsfield-maintenance-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sh"
+          scp -P "$SSH_PORT" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            scripts/maintain-production.sh \
+            "$SSH_USER@$SSH_HOST:$REMOTE_SCRIPT"
+          printf -v REMOTE_COMMAND 'bash %q %q; status=$?; rm -f %q; exit $status' \
+            "$REMOTE_SCRIPT" "$PUBLIC_HEALTH_URL" "$REMOTE_SCRIPT"
+          ssh -p "$SSH_PORT" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "$REMOTE_COMMAND"
