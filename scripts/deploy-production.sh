@@ -135,12 +135,22 @@ wait_for_health() {
 wait_for_url() {
   local url=$1
   local attempts=${2:-6}
+  wait_for_http_status "$url" 200 "$attempts"
+}
+
+wait_for_http_status() {
+  local url=$1
+  local expected_status=$2
+  local attempts=${3:-6}
+  local actual_status
   for attempt in $(seq 1 "$attempts"); do
-    if curl --fail --silent --show-error --max-time 20 "$url" >/dev/null; then
+    actual_status="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 20 "$url" || true)"
+    if [[ "$actual_status" == "$expected_status" ]]; then
       return 0
     fi
     sleep 5
   done
+  echo "Expected HTTP $expected_status from $url, received ${actual_status:-no response}." >&2
   return 1
 }
 
@@ -192,6 +202,12 @@ wait_for_health frontend 60
 echo "Verifying local and public health endpoints."
 wait_for_url http://127.0.0.1:3000/ 6
 wait_for_url "$PUBLIC_HEALTH_URL" 6
+PUBLIC_BASE_URL="${PUBLIC_HEALTH_URL%/}"
+echo "Running non-mutating production smoke tests."
+for route in /projects /library /settings /verify-email /reset-password /api/v1/health; do
+  wait_for_http_status "${PUBLIC_BASE_URL}${route}" 200 6
+done
+wait_for_http_status "${PUBLIC_BASE_URL}/api/v1/account/usage" 401 6
 printf '%s\n' "$TARGET_SHA" > "$DEPLOY_STATE_DIR/current-release"
 printf '%s\n' "$PREVIOUS_SHA" > "$DEPLOY_STATE_DIR/previous-release"
 trap - ERR
