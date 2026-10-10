@@ -26,6 +26,7 @@ interface UserInfo {
 }
 
 interface AuthContextType {
+  authReady: boolean;
   user: UserInfo | null;
   token: string | null;
   login: (email: string, password: string) => Promise<void>;
@@ -34,6 +35,7 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType>({
+  authReady: false,
   user: null,
   token: null,
   login: async () => {},
@@ -53,6 +55,7 @@ export default function RootLayout({
   const pathname = usePathname();
   const [user, setUser] = useState<UserInfo | null>(null);
   const [token, setToken] = useState<string | null>(null);
+  const [authReady, setAuthReady] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot'>('login');
   const [loginEmail, setLoginEmail] = useState('creator@marsfield.ai');
@@ -77,6 +80,7 @@ export default function RootLayout({
         setToken(savedToken);
         setUser(JSON.parse(savedUser));
       }
+      setAuthReady(true);
     }
   }, []);
 
@@ -240,7 +244,7 @@ export default function RootLayout({
   ];
 
   return (
-    <AuthContext.Provider value={{ user, token, login: handleLogin, register: handleRegister, logout: handleLogout }}>
+    <AuthContext.Provider value={{ user, token, authReady, login: handleLogin, register: handleRegister, logout: handleLogout }}>
       <html lang="en">
         <head>
           <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />

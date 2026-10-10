@@ -14,7 +14,7 @@ Run `npm run prisma:generate --workspace=backend` after installing dependencies,
 
 `e2e/studio-workspace.spec.ts` covers project assignment and prompt direction in the generation payload, recent asset previews, a fully visible Generate button at 1280×720, and mobile inspector access. Set `STUDIO_SCREENSHOT_DIR` to an output directory when running that test to regenerate the screenshots.
 
-The full frontend lint baseline contains pre-existing errors. The changed Studio page has the same lint findings as the base revision; the root layout has no findings. The repository's changed-file lint job still evaluates those existing page errors.
+The Studio page and root layout pass the repository's changed-file lint check. The workspace uses typed project and generation data, clears session state on sign-out, and ties credit quotes to the current source and settings so outdated responses cannot enable generation. `e2e/studio-quote.spec.ts` covers quote changes and session cleanup. The full frontend lint baseline still contains errors in unrelated pages.
 
 ## Screenshots
 

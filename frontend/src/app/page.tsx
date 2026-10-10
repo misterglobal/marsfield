@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Image from 'next/image';
 import { api } from '@/lib/api';
 import { useAuth } from './layout';
@@ -19,6 +19,41 @@ interface ReferenceFile {
 interface ProjectOption {
   id: string;
   name: string;
+}
+
+interface StudioProject extends ProjectOption {
+  scenes?: Array<{ id: string; prompt?: string; durationSeconds?: number }>;
+  kitAssignments?: Array<{ brandKit: {
+    id: string;
+    name: string;
+    kind: string;
+    description?: string;
+    promptRules?: string;
+    voice?: string;
+    colors?: string[];
+    fonts?: string[];
+    kitAssets?: Array<{ asset: LibraryAsset }>;
+  } }>;
+}
+
+interface GenerationPrediction {
+  id: string;
+  status: string;
+  output_url?: string;
+  asset_id?: string;
+  variation_index?: number;
+}
+
+interface GenerationPayload {
+  workflow: string;
+  model: string;
+  prompt: string;
+  project_id?: string;
+  storyboard_scene_id?: string;
+  image_storage_object_id?: string;
+  video_storage_object_id?: string;
+  audio_storage_object_id?: string;
+  params: Record<string, string | number | boolean | string[] | undefined>;
 }
 
 interface VariationResult {
@@ -56,6 +91,12 @@ const KLING_REFERENCE_MIN_SECONDS = 3;
 const KLING_REFERENCE_MAX_SECONDS = 9.8;
 
 export default function StudioPage() {
+  const { token, authReady } = useAuth();
+  if (!authReady) return <p role="status">Loading your workspace…</p>;
+  return <StudioWorkspace key={token || 'signed-out'} />;
+}
+
+function StudioWorkspace() {
   const { user, token } = useAuth();
   const [workflow, setWorkflow] = useState('text-to-video');
   const [model, setModel] = useState('alibaba/happyhorse-1.1');
@@ -98,8 +139,7 @@ export default function StudioPage() {
   const [enhanceTargetResolution, setEnhanceTargetResolution] = useState('1080p');
   const [enhanceTargetFps, setEnhanceTargetFps] = useState(30);
   const [extensionDuration, setExtensionDuration] = useState(6);
-  const [enhancementQuote, setEnhancementQuote] = useState<number | null>(null);
-  const [enhancementQuoteError, setEnhancementQuoteError] = useState('');
+  const [quoteResult, setQuoteResult] = useState<{ key: string; credits: number | null; error: string } | null>(null);
   const [cinematicSettings, setCinematicSettings] = useState(DEFAULT_CINEMATIC_SETTINGS);
   const [referenceVideoDuration, setReferenceVideoDuration] = useState<number | null>(null);
   const [seed, setSeed] = useState('');
@@ -130,10 +170,9 @@ export default function StudioPage() {
   const [firstFrame, setFirstFrame] = useState<ReferenceFile | null>(null);
   const [lastFrame, setLastFrame] = useState<ReferenceFile | null>(null);
   const [libraryAssets, setLibraryAssets] = useState<LibraryAsset[]>([]);
-  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [libraryLoading, setLibraryLoading] = useState(Boolean(token));
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [previewAsset, setPreviewAsset] = useState<LibraryAsset | null>(null);
-  const appliedAssetDeepLink = useRef('');
 
   const workflows = [
     { id: 'text-to-video', name: 'Text-to-Video', icon: '📝' },
@@ -180,17 +219,12 @@ export default function StudioPage() {
   }, [token]);
 
   useEffect(() => {
-    if (!token) {
-      setProjects([]);
-      setSelectedProjectId('');
-      return;
-    }
+    if (!token) return;
 
     void api.getProjects()
-      .then((data) => setProjects(data.map((project: any) => ({ id: project.id, name: project.name }))))
+      .then((data: ProjectOption[]) => setProjects(data.map((project) => ({ id: project.id, name: project.name }))))
       .catch((error) => console.error('Failed to load projects:', error));
-    void loadLibraryAssets();
-  }, [token, loadLibraryAssets]);
+  }, [token]);
 
   useEffect(() => {
     if (!token) return;
@@ -201,20 +235,20 @@ export default function StudioPage() {
     const requestedModel = query.get('model');
     if (!projectId || !sceneId) return;
 
-    void api.getProject(projectId).then((project) => {
-      const scene = project.scenes?.find((item: any) => item.id === sceneId);
+    void api.getProject(projectId).then((project: StudioProject) => {
+      const scene = project.scenes?.find((item) => item.id === sceneId);
       if (!scene) return;
-      const assignedKits = (project.kitAssignments || []).map((assignment: any) => assignment.brandKit);
+      const assignedKits = (project.kitAssignments || []).map((assignment) => assignment.brandKit);
       const kitReferenceEntries = assignedKits
-        .flatMap((kit: any) => (kit.kitAssets || []).map(({ asset }: any) => ({ kit, asset })))
-        .filter(({ asset }: any) => asset.type === 'image' && asset.storageObjectId)
-        .filter(({ asset }: any, index: number, all: any[]) => all.findIndex((item) => item.asset.storageObjectId === asset.storageObjectId) === index)
+        .flatMap((kit) => (kit.kitAssets || []).map(({ asset }) => ({ kit, asset })))
+        .filter(({ asset }) => asset.type === 'image' && asset.storageObjectId)
+        .filter(({ asset }, index, all) => all.findIndex((item) => item.asset.storageObjectId === asset.storageObjectId) === index)
         .slice(0, 9);
       const kitReferences: ReferenceFile[] = kitReferenceEntries
-        .map(({ kit, asset }: any) => ({ name: `${kit.name} reference`, id: asset.storageObjectId, url: asset.thumbnailUrl || asset.url, kind: 'image' as const }));
-      const kitGuidance = assignedKits.map((kit: any) => {
+        .map(({ kit, asset }) => ({ name: `${kit.name} reference`, id: asset.storageObjectId!, url: asset.thumbnailUrl || asset.url, kind: 'image' as const }));
+      const kitGuidance = assignedKits.map((kit) => {
         const details = [kit.description, kit.promptRules, kit.voice ? `Voice/tone: ${kit.voice}` : '', Array.isArray(kit.colors) && kit.colors.length ? `Colors: ${kit.colors.join(', ')}` : '', Array.isArray(kit.fonts) && kit.fonts.length ? `Fonts: ${kit.fonts.join(', ')}` : ''].filter(Boolean).join(' ');
-        const imageTags = kitReferenceEntries.map((entry: any, index: number) => entry.kit.id === kit.id ? `[Image${index + 1}]` : '').filter(Boolean);
+        const imageTags = kitReferenceEntries.map((entry, index) => entry.kit.id === kit.id ? `[Image${index + 1}]` : '').filter(Boolean);
         return `${kit.kind === 'character' ? 'Character' : 'Brand'} ${kit.name}: ${details}${imageTags.length ? ` Use ${imageTags.join(' and ')} as identity references.` : ''}`;
       }).filter(Boolean);
       setSelectedProjectId(projectId);
@@ -238,18 +272,16 @@ export default function StudioPage() {
     }).catch((error) => setGenerationError(error.message || 'Failed to load storyboard scene'));
   }, [token]);
 
-  useEffect(() => {
-    if (!token || (!isVideoEnhance && !isImageUpscale && !isVideoCaption && !isSocialResize)) return;
+  const quoteRequest = useMemo(() => {
+    if (!token || (!isVideoEnhance && !isImageUpscale && !isVideoCaption && !isSocialResize)) return null;
     const sourceId = isVideoEnhance || isVideoCaption || isSocialResize ? referenceVideos[0]?.id : imageStorageObjectId;
-    if (!sourceId) {
-      setEnhancementQuote(null);
-      setEnhancementQuoteError('');
-      return;
-    }
-    setEnhancementQuote(null);
-    setEnhancementQuoteError('');
-    const timer = window.setTimeout(() => {
-      const params = {
+    if (!sourceId) return null;
+    return {
+      workflow,
+      model,
+      video_storage_object_id: isVideoEnhance || isVideoCaption || isSocialResize ? sourceId : undefined,
+      image_storage_object_id: isImageUpscale ? sourceId : undefined,
+      params: {
         duration: model === 'xai/grok-imagine-video-extension' ? extensionDuration : undefined,
         target_resolution: enhanceTargetResolution,
         target_fps: enhanceTargetFps,
@@ -259,18 +291,28 @@ export default function StudioPage() {
         format: resizeFormat,
         formats: resizeBatchAll ? ['vertical', 'square', 'landscape'] : undefined,
         mode: resizeMode,
-      };
-      void api.quoteGeneration({
-        workflow,
-        model,
-        video_storage_object_id: isVideoEnhance || isVideoCaption || isSocialResize ? sourceId : undefined,
-        image_storage_object_id: isImageUpscale ? sourceId : undefined,
-        params,
-      }).then((quote) => setEnhancementQuote(quote.credits))
-        .catch((error) => setEnhancementQuoteError(error.message || 'Could not calculate exact credit quote'));
-    }, 400);
-    return () => window.clearTimeout(timer);
+      },
+    };
   }, [token, workflow, model, isVideoEnhance, isImageUpscale, isVideoCaption, isSocialResize, referenceVideos, imageStorageObjectId, extensionDuration, enhanceTargetResolution, enhanceTargetFps, upscaleTargetMp, upscaleFactor, resizeFormat, resizeMode, resizeBatchAll]);
+  const quoteKey = JSON.stringify(quoteRequest);
+  const enhancementQuote = quoteRequest && quoteResult?.key === quoteKey ? quoteResult.credits : null;
+  const enhancementQuoteError = quoteRequest && quoteResult?.key === quoteKey ? quoteResult.error : '';
+
+  useEffect(() => {
+    if (!quoteRequest) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void api.quoteGeneration(quoteRequest).then((quote: { credits: number }) => {
+        if (!cancelled) setQuoteResult({ key: quoteKey, credits: quote.credits, error: '' });
+      }).catch((error: unknown) => {
+        if (!cancelled) setQuoteResult({ key: quoteKey, credits: null, error: error instanceof Error ? error.message : 'Could not calculate exact credit quote' });
+      });
+    }, 400);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [quoteRequest, quoteKey]);
 
   const getBaseCredits = () => {
     if (isSocialResize) return 0;
@@ -322,7 +364,7 @@ export default function StudioPage() {
     creativity: upscaleCreativity,
     output_format: imageOutputFormat,
   };
-  const updateDynamicControl = (key: ControlKey, value: string | number | boolean) => {
+  const updateDynamicControl = useCallback((key: ControlKey, value: string | number | boolean) => {
     if (key === 'target_resolution') setEnhanceTargetResolution(String(value));
     if (key === 'target_fps') setEnhanceTargetFps(Number(value));
     if (key === 'scale_factor' || key === 'upscale_factor') setUpscaleFactor(String(value));
@@ -333,10 +375,10 @@ export default function StudioPage() {
     if (key === 'quality') setUpscaleQuality(Number(value));
     if (key === 'creativity') setUpscaleCreativity(Number(value));
     if (key === 'output_format') setImageOutputFormat(String(value));
-  };
-  const applyModelControlDefaults = (modelId: string) => {
+  }, []);
+  const applyModelControlDefaults = useCallback((modelId: string) => {
     getModelDefinition(modelId)?.controls?.forEach((control) => updateDynamicControl(control.key, control.defaultValue));
-  };
+  }, [updateDynamicControl]);
 
   const uploadReferenceFiles = async (
     files: FileList | null,
@@ -502,8 +544,8 @@ export default function StudioPage() {
       setProjects((current) => [{ id: project.id, name: project.name }, ...current]);
       setSelectedProjectId(project.id);
       setQuickProjectName('');
-    } catch (err: any) {
-      setGenerationError(err.message || 'Failed to create project');
+    } catch (err: unknown) {
+      setGenerationError(err instanceof Error ? err.message : 'Failed to create project');
     }
   };
 
@@ -674,55 +716,64 @@ export default function StudioPage() {
   };
 
   useEffect(() => {
-    if (!token || !libraryAssets.length) return;
-    const query = new URLSearchParams(window.location.search);
-    const requestedWorkflow = query.get('workflow');
-    const assetId = query.get('asset_id');
-    if (!requestedWorkflow || !assetId) return;
-    const signature = `${requestedWorkflow}:${assetId}:${query.get('model') || ''}`;
-    if (appliedAssetDeepLink.current === signature) return;
-    const asset = libraryAssets.find((item) => item.id === assetId && item.storageObjectId);
-    const models = getModelsForWorkflow(requestedWorkflow);
-    if (!asset || !models.length) return;
-    const requestedModel = query.get('model');
-    const nextModel = models.find((item) => item.id === requestedModel) || models[0];
-    const reference: ReferenceFile = {
-      id: asset.storageObjectId!, url: asset.url, kind: asset.type,
-      name: asset.prediction?.prompt?.slice(0, 48) || `Library ${asset.type}`,
-    };
+    if (!token) return;
+    let cancelled = false;
+    void api.getAssets().then((assets: LibraryAsset[]) => {
+      if (cancelled) return;
+      setLibraryAssets(assets);
+      setLibraryLoading(false);
+      const query = new URLSearchParams(window.location.search);
+      const requestedWorkflow = query.get('workflow');
+      const assetId = query.get('asset_id');
+      if (!requestedWorkflow || !assetId) return;
+      const asset = assets.find((item) => item.id === assetId && item.storageObjectId);
+      const models = getModelsForWorkflow(requestedWorkflow);
+      if (!asset || !models.length) return;
+      const requestedModel = query.get('model');
+      const nextModel = models.find((item) => item.id === requestedModel) || models[0];
+      const reference: ReferenceFile = {
+        id: asset.storageObjectId!, url: asset.url, kind: asset.type,
+        name: asset.prediction?.prompt?.slice(0, 48) || `Library ${asset.type}`,
+      };
 
-    setWorkflow(requestedWorkflow);
-    setModel(nextModel.id);
-    applyModelControlDefaults(nextModel.id);
-    if (requestedWorkflow === 'image-to-video' || requestedWorkflow === 'image-upscale') {
-      if (asset.type !== 'image') return;
-      setImageFile(null);
-      setImagePreview(asset.thumbnailUrl || asset.url);
-      setImageStorageObjectId(asset.storageObjectId!);
-    } else if (requestedWorkflow === 'video-edit') {
-      if (asset.type === 'image') setReferenceImages([reference]);
-      if (asset.type === 'video') setReferenceVideos([reference]);
-    } else if (requestedWorkflow === 'video-enhance' && asset.type === 'video') {
-      setReferenceVideos([reference]);
-      setReferenceVideoDuration(null);
-      if (nextModel.id === 'xai/grok-imagine-video-extension') setPrompt('Continue the scene naturally from the final frame.');
-    } else if ((requestedWorkflow === 'video-caption' || requestedWorkflow === 'social-resize') && asset.type === 'video') {
-      setReferenceVideos([reference]);
-      setReferenceVideoDuration(null);
-    } else if (requestedWorkflow === 'text-to-image' && asset.type === 'image') {
-      setReferenceImages([reference]);
-    } else if (requestedWorkflow === 'lip-sync') {
-      if (asset.type === 'image') {
+      setWorkflow(requestedWorkflow);
+      setModel(nextModel.id);
+      applyModelControlDefaults(nextModel.id);
+      if (requestedWorkflow === 'image-to-video' || requestedWorkflow === 'image-upscale') {
+        if (asset.type !== 'image') return;
+        setImageFile(null);
         setImagePreview(asset.thumbnailUrl || asset.url);
         setImageStorageObjectId(asset.storageObjectId!);
+      } else if (requestedWorkflow === 'video-edit') {
+        if (asset.type === 'image') setReferenceImages([reference]);
+        if (asset.type === 'video') setReferenceVideos([reference]);
+      } else if (requestedWorkflow === 'video-enhance' && asset.type === 'video') {
+        setReferenceVideos([reference]);
+        setReferenceVideoDuration(null);
+        if (nextModel.id === 'xai/grok-imagine-video-extension') setPrompt('Continue the scene naturally from the final frame.');
+      } else if ((requestedWorkflow === 'video-caption' || requestedWorkflow === 'social-resize') && asset.type === 'video') {
+        setReferenceVideos([reference]);
+        setReferenceVideoDuration(null);
+      } else if (requestedWorkflow === 'text-to-image' && asset.type === 'image') {
+        setReferenceImages([reference]);
+      } else if (requestedWorkflow === 'lip-sync') {
+        if (asset.type === 'image') {
+          setImagePreview(asset.thumbnailUrl || asset.url);
+          setImageStorageObjectId(asset.storageObjectId!);
+        }
+        if (asset.type === 'audio') {
+          setAudioFileName(reference.name);
+          setAudioStorageObjectId(asset.storageObjectId!);
+        }
       }
-      if (asset.type === 'audio') {
-        setAudioFileName(reference.name);
-        setAudioStorageObjectId(asset.storageObjectId!);
+    }).catch((error: unknown) => {
+      if (!cancelled) {
+        console.error('Failed to load reusable assets:', error);
+        setLibraryLoading(false);
       }
-    }
-    appliedAssetDeepLink.current = signature;
-  }, [token, libraryAssets]);
+    });
+    return () => { cancelled = true; };
+  }, [token, applyModelControlDefaults]);
 
   const pollPrediction = async (id: string, abortSignal: AbortController, variationIndex = 0) => {
     let attempts = 0;
@@ -854,7 +905,7 @@ export default function StudioPage() {
       const submittedPrompt = supportsCinematicControls
         ? buildCinematicPrompt(prompt, cinematicSettings)
         : prompt;
-      const generatePayload: any = {
+      const generatePayload: GenerationPayload = {
         workflow,
         model,
         prompt: submittedPrompt,
@@ -953,14 +1004,14 @@ export default function StudioPage() {
 
       const data = await api.generate(generatePayload);
       const resultType = workflow.includes('image') && workflow !== 'image-to-video' ? 'image' : 'video';
-      const returnedPredictions = Array.isArray(data.predictions) ? data.predictions : [{
+      const returnedPredictions: GenerationPrediction[] = Array.isArray(data.predictions) ? data.predictions : [{
         id: data.id,
         status: data.status,
         output_url: data.output_url,
         variation_index: 0,
       }];
 
-      setVariationResults(returnedPredictions.map((prediction: any) => ({
+      setVariationResults(returnedPredictions.map((prediction) => ({
         id: prediction.id,
         status: prediction.status,
         url: prediction.output_url,
@@ -984,12 +1035,12 @@ export default function StudioPage() {
         });
         setTimeout(() => setIsGenerating(false), 1500);
       } else {
-        await Promise.all(returnedPredictions.map((prediction: any) =>
+        await Promise.all(returnedPredictions.map((prediction) =>
           pollPrediction(prediction.id, abortController, prediction.variation_index ?? 0)
         ));
       }
-    } catch (err: any) {
-      setGenerationError(err.message || 'Generation request failed');
+    } catch (err: unknown) {
+      setGenerationError(err instanceof Error ? err.message : 'Generation request failed');
       setIsGenerating(false);
     }
   };
