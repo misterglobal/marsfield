@@ -22,6 +22,7 @@ COPY --from=build --chown=node:node /app/package.json /app/package-lock.json ./
 COPY --from=build --chown=node:node /app/backend/package.json backend/package.json
 COPY --from=build --chown=node:node /app/frontend/package.json frontend/package.json
 COPY --from=build --chown=node:node /app/node_modules node_modules
+COPY --from=build --chown=node:node /app/backend/node_modules backend/node_modules
 COPY --from=build --chown=node:node /app/backend/dist backend/dist
 COPY --from=build --chown=node:node /app/backend/prisma backend/prisma
 

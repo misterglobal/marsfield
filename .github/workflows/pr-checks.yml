@@ -32,6 +32,11 @@ jobs:
         run: npm run build --workspace=backend
       - name: Run backend tests
         run: node --test backend/test/*.test.js
+      - name: Verify backend production image runtime dependencies
+        run: |
+          docker build --file backend/Dockerfile --tag marsfield-backend-ci .
+          docker run --rm --workdir /app/backend --entrypoint node marsfield-backend-ci \
+            -e "require('express'); require('multer'); console.log('backend runtime dependencies load')"
       - name: Build frontend
         run: npm run build --workspace=frontend
 
