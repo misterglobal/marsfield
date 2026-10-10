@@ -28,9 +28,9 @@ The automation handles one issue at a time and resumes `codex-working` work befo
 - Backend TypeScript build passes.
 - All 11 backend unit tests pass.
 - The Next.js production build passes.
-- All 34 Playwright browser tests pass on desktop and mobile Chromium projects.
+- All 39 Playwright browser tests pass on desktop and mobile Chromium projects.
 - The existing full frontend lint has pre-existing debt. CI therefore lints every changed frontend JavaScript or TypeScript file strictly, preventing new lint debt without hiding the existing findings.
-- The existing production dependency audit reports high and critical advisories. CI rejects new high-severity advisories and permits the documented baseline only until October 20, 2026; dependency upgrades are tracked as a separate security repair.
+- The production dependency audit passes with no known advisories. CI runs `npm audit --omit=dev` directly and rejects any new production advisory.
 
 CI uses only the repository and debug/test dependencies. It does not receive production database credentials, provider API tokens, billing secrets, R2 credentials, or Hetzner SSH keys.
 
