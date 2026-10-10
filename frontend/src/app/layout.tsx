@@ -14,6 +14,7 @@ import {
 } from "@/lib/session";
 import { Turnstile } from "@/components/Turnstile";
 import "./globals.css";
+import "./studio.css";
 
 interface UserInfo {
   id: string;
@@ -25,6 +26,7 @@ interface UserInfo {
 }
 
 interface AuthContextType {
+  authReady: boolean;
   user: UserInfo | null;
   token: string | null;
   login: (email: string, password: string) => Promise<void>;
@@ -33,6 +35,7 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType>({
+  authReady: false,
   user: null,
   token: null,
   login: async () => {},
@@ -52,6 +55,7 @@ export default function RootLayout({
   const pathname = usePathname();
   const [user, setUser] = useState<UserInfo | null>(null);
   const [token, setToken] = useState<string | null>(null);
+  const [authReady, setAuthReady] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot'>('login');
   const [loginEmail, setLoginEmail] = useState('creator@marsfield.ai');
@@ -76,6 +80,7 @@ export default function RootLayout({
         setToken(savedToken);
         setUser(JSON.parse(savedUser));
       }
+      setAuthReady(true);
     }
   }, []);
 
@@ -239,25 +244,25 @@ export default function RootLayout({
   ];
 
   return (
-    <AuthContext.Provider value={{ user, token, login: handleLogin, register: handleRegister, logout: handleLogout }}>
+    <AuthContext.Provider value={{ user, token, authReady, login: handleLogin, register: handleRegister, logout: handleLogout }}>
       <html lang="en">
         <head>
           <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
           <meta name="theme-color" content="#030303" />
         </head>
-        <body>
+        <body className={pathname === '/' ? 'studio-shell' : undefined}>
           {user && token && <SessionTimeout onExpire={handleSessionExpired} />}
           {/* Persistent Sidebar */}
           <aside className="sidebar">
             <div className="sidebar-logo">
-              <span>🌌</span> Marsfield
+              <span aria-hidden="true">✦</span> Marsfield
             </div>
             <ul className="sidebar-menu">
               {menuItems.map((item) => {
                 const isActive = pathname === item.href;
                 return (
                   <li key={item.name} className={`sidebar-item ${isActive ? "active" : ""}`}>
-                    <Link href={item.href}>
+                    <Link href={item.href} title={item.name} aria-current={isActive ? 'page' : undefined}>
                       <span>{item.icon}</span> {item.name}
                     </Link>
                   </li>
@@ -316,7 +321,7 @@ export default function RootLayout({
             <header className="top-bar">
               <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
                 <h2 style={{ fontSize: "1.1rem", fontWeight: 600, fontFamily: "var(--font-display)" }}>
-                  {pathname === "/" && "Studio Creative Workspace"}
+                  {pathname === "/" && "Marsfield Studio"}
                   {pathname === "/projects" && "Projects & Storyboards"}
                   {pathname === "/influencer" && "AI Influencer Studio"}
                   {pathname === "/library" && "Asset Vault & Library"}
