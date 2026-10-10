@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import Image from 'next/image';
 import { api } from '@/lib/api';
 import { useAuth } from './layout';
 import { CinematicControls } from '@/components/CinematicControls';
@@ -130,6 +131,8 @@ export default function StudioPage() {
   const [lastFrame, setLastFrame] = useState<ReferenceFile | null>(null);
   const [libraryAssets, setLibraryAssets] = useState<LibraryAsset[]>([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [previewAsset, setPreviewAsset] = useState<LibraryAsset | null>(null);
   const appliedAssetDeepLink = useRef('');
 
   const workflows = [
@@ -168,7 +171,7 @@ export default function StudioPage() {
     setLibraryLoading(true);
     try {
       const assets = await api.getAssets();
-      setLibraryAssets(assets.filter((asset: LibraryAsset) => asset.storageObjectId));
+      setLibraryAssets(assets);
     } catch (error) {
       console.error('Failed to load reusable assets:', error);
     } finally {
@@ -738,6 +741,7 @@ export default function StudioPage() {
           ));
           setGenerationProgress(100);
           setGenerationStatus('succeeded');
+          void loadLibraryAssets();
           setLastGeneratedAsset({
             id,
             url: data.output_url,
@@ -843,6 +847,7 @@ export default function StudioPage() {
     setGenerationStatus('submitting');
     setGenerationError('');
     setLastGeneratedAsset(null);
+    setPreviewAsset(null);
     setVariationResults([]);
 
     try {
@@ -970,6 +975,7 @@ export default function StudioPage() {
       if (data.status === 'succeeded' && data.output_url) {
         setGenerationProgress(100);
         setGenerationStatus('succeeded');
+        void loadLibraryAssets();
         setLastGeneratedAsset({
           id: data.id,
           url: data.output_url,
@@ -998,10 +1004,60 @@ export default function StudioPage() {
   }, [pollAbortSignal]);
 
   return (
-    <div className="studio-layout" style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '2rem', height: '100%' }}>
+    <div className={`studio-layout premium-studio ${inspectorOpen ? 'inspector-open' : ''}`}>
+      <header className="studio-project-bar">
+        <div className="studio-project-picker">
+          <span className="studio-eyebrow">WORKSPACE /</span>
+          <select aria-label="Project" value={selectedProjectId} onChange={(event) => setSelectedProjectId(event.target.value)}>
+            <option value="">Personal workspace</option>
+            {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+          </select>
+        </div>
+        <details className="studio-new-project">
+          <summary>+ New project</summary>
+          <div>
+            <input className="form-input" aria-label="Quick project name" placeholder="Quick project name" value={quickProjectName} onChange={(event) => setQuickProjectName(event.target.value)} />
+            <button className="btn btn-secondary" onClick={handleQuickCreateProject} disabled={!token || !quickProjectName.trim()}>Add</button>
+          </div>
+        </details>
+        <button className="btn btn-secondary inspector-toggle" aria-expanded={inspectorOpen} aria-controls="generation-inspector" onClick={() => setInspectorOpen(!inspectorOpen)}>Generation Settings</button>
+      </header>
 
       {/* Studio Workbench (Left Column) */}
-      <div className="studio-workbench" style={{ display: 'flex', flexDirection: 'column', gap: '2.5rem' }}>
+      <div className="studio-workbench">
+        {!lastGeneratedAsset && (
+          <section className="studio-canvas" aria-label="Creative canvas">
+            <div className="studio-canvas-heading"><span className="studio-eyebrow">CREATIVE CANVAS</span><span>{workflows.find((item) => item.id === workflow)?.name}</span></div>
+            {previewAsset ? (
+              <div className="studio-preview">
+                {previewAsset.type === 'video' ? <video src={previewAsset.url} controls /> : previewAsset.type === 'audio' ? <audio src={previewAsset.url} controls /> : <Image src={previewAsset.url} alt={previewAsset.prediction?.prompt || 'Selected generation'} width={960} height={540} unoptimized />}
+                <button className="btn btn-secondary" onClick={() => setPreviewAsset(null)}>Clear preview</button>
+              </div>
+            ) : (
+              <div className="studio-canvas-empty">
+                <span className="studio-canvas-mark" aria-hidden="true">✦</span>
+                <span className="studio-eyebrow">A LITTLE DIRECTION. ENDLESS POSSIBILITY.</span>
+                <h1>Your next idea starts here.</h1>
+                <p>Describe a world, bring a frame to life, or give your footage a new perspective.</p>
+                <button className="btn btn-secondary" onClick={() => document.getElementById('studio-composer')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>Start creating <span aria-hidden="true">↘</span></button>
+              </div>
+            )}
+          </section>
+        )}
+        <section className="studio-recents" aria-label="Recent generations">
+          <div className="studio-section-heading"><h2>Recent generations</h2><a href="/library">View library ↗</a></div>
+          {libraryLoading ? <p role="status">Loading your library…</p> : libraryAssets.length ? (
+            <div className="studio-recent-grid">
+              {libraryAssets.slice(0, 6).map((asset) => (
+                <button key={asset.id} className={`studio-recent-item ${previewAsset?.id === asset.id ? 'selected' : ''}`} aria-label={`Preview ${asset.prediction?.prompt || asset.type}`} onClick={() => { setPreviewAsset(asset); setLastGeneratedAsset(null); }}>
+                  {asset.thumbnailUrl || asset.type === 'image' ? <Image src={asset.thumbnailUrl || asset.url} alt="" width={240} height={135} unoptimized /> : <span className="studio-media-symbol" aria-hidden="true">{asset.type === 'video' ? '▷' : '♫'}</span>}
+                  <span>{asset.prediction?.prompt || `${asset.type} generation`}</span>
+                </button>
+              ))}
+            </div>
+          ) : <p>Your generations will appear here. Make something worth keeping.</p>}
+        </section>
+        <section className="studio-composer" id="studio-composer" aria-label="Universal prompt composer">
 
         {/* Workflow Tabs */}
         <div className="workflow-tabs" style={{ display: 'flex', gap: '1rem', borderBottom: '1px solid var(--panel-border)', paddingBottom: '1rem', flexWrap: 'wrap' }}>
@@ -1122,7 +1178,7 @@ export default function StudioPage() {
         )}
 
         {/* Prompt Input & Assist */}
-        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+        <div className="glass-card studio-inputs" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
           {(workflow === 'image-to-video' || isImageUpscale) && (
             <>
               <div className="prompt-heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1484,39 +1540,18 @@ export default function StudioPage() {
               </div>
               <textarea
                 className="form-textarea"
-                rows={5}
+                aria-label="Creative prompt"
+                rows={3}
                 placeholder={isPrunaAvatar ? 'The person speaks naturally to camera with warm studio lighting, subtle head movement, and friendly expression.' : 'A majestic golden dragon soaring over neon skyscrapers at sunset, reflection mapping on building glass...'}
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
               />
-              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                {['Cinematic', 'Cyberpunk', 'Anime Style', 'Retro 80s', 'Vintage Film'].map((pill) => (
-                  <span
-                    key={pill}
-                    onClick={() => setPrompt((prev) => (prev ? `${prev}, ${pill.toLowerCase()}` : pill))}
-                    style={{
-                      background: 'rgba(255, 255, 255, 0.05)',
-                      border: '1px solid var(--panel-border)',
-                      padding: '0.35rem 0.75rem',
-                      borderRadius: '20px',
-                      fontSize: '0.8rem',
-                      cursor: 'pointer',
-                      color: 'var(--foreground-muted)',
-                      transition: 'background 0.2s',
-                    }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)')}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)')}
-                  >
-                    + {pill}
-                  </span>
-                ))}
-              </div>
             </>
           )}
         </div>
 
         {/* Generate / Status Board */}
-        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', borderLeft: '4px solid var(--primary)' }}>
+        <div className="glass-card studio-generate" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           {generationError && (
             <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', padding: '0.75rem', borderRadius: '8px', fontSize: '0.85rem', color: '#ef4444' }}>
               {generationError}
@@ -1603,9 +1638,10 @@ export default function StudioPage() {
           )}
         </div>
 
+        </section>
         {/* Results Display */}
         {lastGeneratedAsset && (
-          <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', borderLeft: '4px solid var(--accent)' }}>
+          <div className="glass-card studio-output" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             <h3 style={{ fontSize: '1.1rem', fontWeight: 600, margin: 0 }}>📺 Generated Output</h3>
             <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '12px', overflow: 'hidden', aspectRatio: '16/9' }}>
               {lastGeneratedAsset.type === 'video' ? (
@@ -1691,31 +1727,22 @@ export default function StudioPage() {
       </div>
 
       {/* Settings Panel (Right Column) */}
-      <aside className="glass-card studio-settings" style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem', height: 'fit-content' }}>
+      <aside id="generation-inspector" className="glass-card studio-settings" aria-label="Generation Settings">
         <h3 style={{ fontSize: '1.1rem', fontWeight: 700, borderBottom: '1px solid var(--panel-border)', paddingBottom: '0.75rem' }}>
-          🔧 Settings
+          Generation Settings
         </h3>
 
-        <div>
-          <label className="form-label">Project</label>
-          <select className="form-select" value={selectedProjectId} onChange={(e) => setSelectedProjectId(e.target.value)}>
-            <option value="">No project</option>
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>{project.name}</option>
+        <section className="studio-director" aria-label="Marsfield Creative Director">
+          <span className="studio-eyebrow">✦ YOUR CREATIVE PARTNER</span>
+          <h3>Marsfield Creative Director</h3>
+          <p>Give your idea a cinematic starting point. Add lighting, lens, and texture direction to your prompt.</p>
+          <div className="studio-style-suggestions">
+            {['Cinematic', 'Cyberpunk', 'Anime Style', 'Retro 80s', 'Vintage Film'].map((style) => (
+              <button type="button" key={style} onClick={() => setPrompt((current) => current ? `${current}, ${style.toLowerCase()}` : style)}>+ {style}</button>
             ))}
-          </select>
-          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.65rem' }}>
-            <input
-              className="form-input"
-              placeholder="Quick project name"
-              value={quickProjectName}
-              onChange={(e) => setQuickProjectName(e.target.value)}
-            />
-            <button className="btn btn-secondary" onClick={handleQuickCreateProject} disabled={!token || !quickProjectName.trim()}>
-              Add
-            </button>
           </div>
-        </div>
+          <button className="btn btn-secondary" disabled={!prompt} onClick={handleEnhancePrompt}>Refine my direction ↗</button>
+        </section>
 
         {/* Model Selector */}
         <div>

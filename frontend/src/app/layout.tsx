@@ -14,6 +14,7 @@ import {
 } from "@/lib/session";
 import { Turnstile } from "@/components/Turnstile";
 import "./globals.css";
+import "./studio.css";
 
 interface UserInfo {
   id: string;
@@ -245,19 +246,19 @@ export default function RootLayout({
           <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
           <meta name="theme-color" content="#030303" />
         </head>
-        <body>
+        <body className={pathname === '/' ? 'studio-shell' : undefined}>
           {user && token && <SessionTimeout onExpire={handleSessionExpired} />}
           {/* Persistent Sidebar */}
           <aside className="sidebar">
             <div className="sidebar-logo">
-              <span>🌌</span> Marsfield
+              <span aria-hidden="true">✦</span> Marsfield
             </div>
             <ul className="sidebar-menu">
               {menuItems.map((item) => {
                 const isActive = pathname === item.href;
                 return (
                   <li key={item.name} className={`sidebar-item ${isActive ? "active" : ""}`}>
-                    <Link href={item.href}>
+                    <Link href={item.href} title={item.name} aria-current={isActive ? 'page' : undefined}>
                       <span>{item.icon}</span> {item.name}
                     </Link>
                   </li>
@@ -316,7 +317,7 @@ export default function RootLayout({
             <header className="top-bar">
               <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
                 <h2 style={{ fontSize: "1.1rem", fontWeight: 600, fontFamily: "var(--font-display)" }}>
-                  {pathname === "/" && "Studio Creative Workspace"}
+                  {pathname === "/" && "Marsfield Studio"}
                   {pathname === "/projects" && "Projects & Storyboards"}
                   {pathname === "/influencer" && "AI Influencer Studio"}
                   {pathname === "/library" && "Asset Vault & Library"}
