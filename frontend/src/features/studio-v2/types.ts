@@ -3,13 +3,29 @@ export type EntityId = string;
 export type AssetKind = "image" | "video" | "audio" | "reference";
 
 export type GenerationStatus =
-  | "draft"
-  | "ready"
   | "queued"
-  | "running"
-  | "succeeded"
+  | "processing"
+  | "completed"
   | "failed"
   | "cancelled";
+
+export interface GenerationError {
+  code: string;
+  message: string;
+  retryable: boolean;
+}
+
+export interface GenerationCredits {
+  charged: number;
+  unit: "credits";
+}
+
+export interface GenerationProviderMetadata {
+  adapter: string;
+  model?: string;
+  providerJobId?: string;
+  rawStatus?: string;
+}
 
 export interface Project {
   id: EntityId;
@@ -32,7 +48,9 @@ export interface Asset {
 export interface GenerationResult {
   id: EntityId;
   jobId: EntityId;
-  assetId: EntityId;
+  assetId?: EntityId;
+  kind: "image";
+  url: string;
   createdAt: string;
 }
 
@@ -43,9 +61,11 @@ export interface GenerationJob {
   prompt: string;
   inputAssetIds: EntityId[];
   status: GenerationStatus;
-  progress?: number;
+  progress: number;
   results: GenerationResult[];
-  errorMessage?: string;
+  credits: GenerationCredits;
+  provider: GenerationProviderMetadata;
+  error?: GenerationError;
   createdAt: string;
   updatedAt: string;
 }

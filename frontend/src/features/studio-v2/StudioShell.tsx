@@ -1,5 +1,8 @@
 "use client";
 
+import Image from "next/image";
+import { useEffect, useRef } from "react";
+import { generateImage } from "./generation-service";
 import { EmptyState, IconButton, SegmentedControl, StudioRegion } from "./StudioPrimitives";
 import { StudioProvider, useStudio } from "./state";
 import type { WorkspaceView } from "./types";
@@ -55,7 +58,7 @@ function StudioInspector() {
         <p>Select an asset or generation to see its settings, lineage, and available actions.</p>
         <dl>
           <div><dt>Selection</dt><dd>None</dd></div>
-          <div><dt>Active jobs</dt><dd>{state.jobs.filter((job) => job.status === "running" || job.status === "queued").length}</dd></div>
+          <div><dt>Active jobs</dt><dd>{state.jobs.filter((job) => job.status === "processing" || job.status === "queued").length}</dd></div>
           <div><dt>Workspace</dt><dd>{state.workspace.view}</dd></div>
         </dl>
       </div>
@@ -65,9 +68,35 @@ function StudioInspector() {
 
 function StudioComposer() {
   const { state, dispatch } = useStudio();
+  const abortController = useRef<AbortController | null>(null);
+  const submitting = useRef(false);
+  const activeJob = state.jobs[0];
+
+  useEffect(() => () => abortController.current?.abort(), []);
+
+  const submitGeneration = async () => {
+    if (submitting.current) return;
+    submitting.current = true;
+    abortController.current?.abort();
+    abortController.current = new AbortController();
+    try {
+      await generateImage(
+        { prompt: state.workspace.composerDraft, projectId: state.selectedProjectId ?? undefined },
+        {
+          signal: abortController.current.signal,
+          onUpdate: (job) => dispatch({ type: "upsert-job", job }),
+        },
+      );
+    } finally {
+      submitting.current = false;
+    }
+  };
 
   return (
-    <form className={styles.composer} aria-label="Universal composer" onSubmit={(event) => event.preventDefault()}>
+    <form className={styles.composer} aria-label="Universal composer" onSubmit={(event) => {
+      event.preventDefault();
+      void submitGeneration();
+    }}>
       <label htmlFor="studio-v2-prompt">What do you want to create?</label>
       <div className={styles.composerInput}>
         <textarea
@@ -77,11 +106,21 @@ function StudioComposer() {
           placeholder="Describe the creative outcome. Tools and models will come later."
           rows={2}
         />
-        <button type="submit" disabled title="Generation arrives in a later Studio V2 stage">Create</button>
+        <button
+          type="submit"
+          disabled={!state.workspace.composerDraft.trim() || activeJob?.status === "queued" || activeJob?.status === "processing"}
+        >
+          {activeJob?.status === "queued" || activeJob?.status === "processing" ? "Creating…" : "Create image"}
+        </button>
+        {(activeJob?.status === "queued" || activeJob?.status === "processing") && (
+          <button type="button" className={styles.cancelButton} onClick={() => abortController.current?.abort()}>
+            Cancel tracking
+          </button>
+        )}
       </div>
       <div className={styles.composerMeta}>
         <span>No references attached</span>
-        <span>Generation disabled in foundation</span>
+        <span>Image generation · {activeJob ? `${activeJob.credits.charged} credits charged` : "existing Marsfield API"}</span>
       </div>
     </form>
   );
@@ -89,6 +128,7 @@ function StudioComposer() {
 
 function StudioWorkspace() {
   const { state, dispatch } = useStudio();
+  const activeJob = state.jobs[0];
 
   return (
     <div className={styles.workspace} role="region" aria-label="Studio V2 workspace">
@@ -125,12 +165,40 @@ function StudioWorkspace() {
         </div>
       </header>
       <StudioRegion label="Creative workspace" className={styles.canvas}>
-        <EmptyState
-          eyebrow="Studio V2 foundation"
-          title="Start with the creative outcome"
-          description="This workspace is ready for projects, assets, generations, and lineage. Existing tools remain unchanged while each capability moves here in later stages."
-          action={<button type="button" onClick={() => document.getElementById("studio-v2-prompt")?.focus()}>Start describing</button>}
-        />
+        {activeJob ? (
+          <article className={styles.generationCard} aria-live="polite" data-error-code={activeJob.error?.code}>
+            <span className={styles.eyebrow}>Image generation</span>
+            <h2>{activeJob.status === "completed" ? "Image ready" : activeJob.status === "failed" ? "Generation failed" : activeJob.status === "cancelled" ? "Tracking cancelled" : "Creating your image"}</h2>
+            <p>{activeJob.prompt}</p>
+            {(activeJob.status === "queued" || activeJob.status === "processing") && (
+              <div className={styles.progress} role="progressbar" aria-label="Image generation progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={activeJob.progress}>
+                <span style={{ width: `${activeJob.progress}%` }} />
+              </div>
+            )}
+            {activeJob.error && <p className={styles.generationError}>{activeJob.error.message}</p>}
+            {activeJob.error && (
+              <p>{activeJob.error.retryable ? "You can try this request again." : "Review your account or request before trying again."}</p>
+            )}
+            {activeJob.results[0] && (
+              <Image
+                className={styles.generatedImage}
+                src={activeJob.results[0].url}
+                alt={`Generated result for ${activeJob.prompt}`}
+                width={768}
+                height={768}
+                unoptimized
+              />
+            )}
+            <p className={styles.generationMeta}>{activeJob.status} · {activeJob.progress}% · {activeJob.credits.charged} credits</p>
+          </article>
+        ) : (
+          <EmptyState
+            eyebrow="Unified generation"
+            title="Start with the creative outcome"
+            description="Describe an image and Studio V2 will handle the existing generation API, lifecycle, credits, and result without exposing provider-specific controls."
+            action={<button type="button" onClick={() => document.getElementById("studio-v2-prompt")?.focus()}>Describe an image</button>}
+          />
+        )}
       </StudioRegion>
       <StudioComposer />
     </div>

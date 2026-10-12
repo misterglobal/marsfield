@@ -3,6 +3,13 @@ import { SESSION_EXPIRED_MESSAGE, dispatchSessionExpired } from './session';
 
 const API_BASE_URL = '/api/v1';
 
+export class ApiRequestError extends Error {
+  constructor(message: string, public readonly status: number, public readonly code?: string) {
+    super(message);
+    this.name = 'ApiRequestError';
+  }
+}
+
 export function getDeviceId(): string {
   if (typeof window === 'undefined') return '';
   const existing = localStorage.getItem('marsfield_device_id');
@@ -36,10 +43,14 @@ async function request(endpoint: string, options: RequestInit = {}) {
   if (!response.ok) {
     if (response.status === 401 && headers.Authorization) {
       dispatchSessionExpired();
-      throw new Error(SESSION_EXPIRED_MESSAGE);
+      throw new ApiRequestError(SESSION_EXPIRED_MESSAGE, response.status, 'session_expired');
     }
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
+    throw new ApiRequestError(
+      errorData.error || `HTTP error! Status: ${response.status}`,
+      response.status,
+      errorData.code,
+    );
   }
 
   if (response.status === 204) {
@@ -78,11 +89,12 @@ export const api = {
   }),
 
   // Predictions
-  generate: (payload: any) => request('/generate', {
+  generate: (payload: any, options: RequestInit = {}) => request('/generate', {
+    ...options,
     method: 'POST',
     body: JSON.stringify(payload),
   }),
-  getPrediction: (id: string) => request(`/predictions/${id}`),
+  getPrediction: (id: string, options: RequestInit = {}) => request(`/predictions/${id}`, options),
 
   uploadFile: async (file: File, purpose = 'generation-reference', onProgress?: (percent: number) => void) => {
     const prepared = await request('/uploads/presign', {
