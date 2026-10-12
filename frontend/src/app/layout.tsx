@@ -50,6 +50,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   const pathname = usePathname();
+  const isStudioV2 = pathname === "/studio-v2";
   const [user, setUser] = useState<UserInfo | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [showLogin, setShowLogin] = useState(false);
@@ -246,6 +247,7 @@ export default function RootLayout({
           <meta name="theme-color" content="#030303" />
         </head>
         <body>
+          {isStudioV2 ? children : <>
           {user && token && <SessionTimeout onExpire={handleSessionExpired} />}
           {/* Persistent Sidebar */}
           <aside className="sidebar">
@@ -616,6 +618,7 @@ export default function RootLayout({
               </div>
             </div>
           )}
+          </>}
         </body>
       </html>
     </AuthContext.Provider>
