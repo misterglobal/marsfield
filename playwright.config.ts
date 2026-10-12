@@ -19,6 +19,7 @@ export default defineConfig({
   ],
   webServer: {
     command: 'npm run dev --workspace=frontend -- --hostname 127.0.0.1 --port 3100',
+    env: { STUDIO_V2_FAILURE_TEST: 'enabled' },
     url: 'http://127.0.0.1:3100',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
