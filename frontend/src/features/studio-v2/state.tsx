@@ -5,9 +5,11 @@ import {
   type Dispatch,
   type PropsWithChildren,
   useContext,
+  useEffect,
   useMemo,
   useReducer,
 } from "react";
+import { api } from "@/lib/api";
 import type { Asset, EntityId, GenerationJob, Project, WorkspaceState, WorkspaceView } from "./types";
 
 interface StudioState {
@@ -16,6 +18,11 @@ interface StudioState {
   jobs: GenerationJob[];
   selectedProjectId: EntityId | null;
   selectedAssetId: EntityId | null;
+  projectsLoading: boolean;
+  assetsLoading: boolean;
+  loadError: string | null;
+  restored: boolean;
+  activeUserId: string | null;
   workspace: WorkspaceState;
 }
 
@@ -27,7 +34,14 @@ type StudioAction =
   | { type: "set-navigation-open"; open: boolean }
   | { type: "set-workspace-view"; view: WorkspaceView }
   | { type: "replace-jobs"; jobs: GenerationJob[] }
-  | { type: "upsert-job"; job: GenerationJob };
+  | { type: "upsert-job"; job: GenerationJob }
+  | { type: "restore-workspace"; projectId: EntityId | null; composerDraft: string }
+  | { type: "replace-projects"; projects: Project[] }
+  | { type: "replace-assets"; assets: Asset[] }
+  | { type: "set-load-error"; message: string | null }
+  | { type: "set-projects-loading"; loading: boolean }
+  | { type: "set-assets-loading"; loading: boolean }
+  | { type: "reset-user"; userId: string | null; projectId: EntityId | null; composerDraft: string };
 
 const initialState: StudioState = {
   projects: [],
@@ -35,6 +49,11 @@ const initialState: StudioState = {
   jobs: [],
   selectedProjectId: null,
   selectedAssetId: null,
+  projectsLoading: true,
+  assetsLoading: true,
+  loadError: null,
+  restored: false,
+  activeUserId: null,
   workspace: {
     composerDraft: "",
     inspectorOpen: false,
@@ -68,6 +87,31 @@ function studioReducer(state: StudioState, action: StudioAction): StudioState {
           : [action.job, ...state.jobs],
       };
     }
+    case "restore-workspace":
+      return {
+        ...state,
+        selectedProjectId: action.projectId,
+        workspace: { ...state.workspace, composerDraft: action.composerDraft },
+        restored: true,
+      };
+    case "replace-projects":
+      return { ...state, projects: action.projects, projectsLoading: false };
+    case "replace-assets":
+      return { ...state, assets: action.assets, selectedAssetId: null, assetsLoading: false };
+    case "set-load-error":
+      return { ...state, loadError: action.message };
+    case "set-projects-loading":
+      return { ...state, projectsLoading: action.loading };
+    case "set-assets-loading":
+      return { ...state, assetsLoading: action.loading };
+    case "reset-user":
+      return {
+        ...initialState,
+        selectedProjectId: action.projectId,
+        workspace: { ...initialState.workspace, composerDraft: action.composerDraft },
+        restored: true,
+        activeUserId: action.userId,
+      };
   }
 }
 
@@ -80,8 +124,95 @@ interface StudioContextValue {
 
 const StudioContext = createContext<StudioContextValue | null>(null);
 
-export function StudioProvider({ children }: PropsWithChildren) {
+const projectKey = (userId: string) => `marsfield_studio_v2_project_${userId}`;
+const draftKey = (userId: string) => `marsfield_studio_v2_draft_${userId}`;
+
+function normalizeProject(project: Record<string, unknown>): Project {
+  return {
+    id: String(project.id),
+    name: String(project.name || "Untitled project"),
+    description: typeof project.description === "string" ? project.description : undefined,
+    createdAt: String(project.createdAt || ""),
+    updatedAt: String(project.updatedAt || ""),
+  };
+}
+
+function normalizeAsset(asset: Record<string, unknown>): Asset {
+  const prediction = asset.prediction as Record<string, unknown> | undefined;
+  return {
+    id: String(asset.id),
+    projectId: asset.projectId ? String(asset.projectId) : undefined,
+    kind: String(asset.type || "image") as Asset["kind"],
+    name: typeof prediction?.prompt === "string" && prediction.prompt.trim()
+      ? prediction.prompt
+      : `${String(asset.type || "media")} asset`,
+    url: String(asset.url || ""),
+    thumbnailUrl: typeof asset.thumbnailUrl === "string" ? asset.thumbnailUrl : undefined,
+    storageObjectId: asset.storageObjectId ? String(asset.storageObjectId) : undefined,
+    sourceGenerationId: asset.predictionId ? String(asset.predictionId) : undefined,
+    createdAt: String(asset.createdAt || ""),
+  };
+}
+
+export function StudioProvider({ children, userId }: PropsWithChildren<{ userId?: string }>) {
   const [state, dispatch] = useReducer(studioReducer, initialState);
+
+  useEffect(() => {
+    dispatch(userId ? {
+      type: "reset-user",
+      userId,
+      projectId: localStorage.getItem(projectKey(userId)),
+      composerDraft: localStorage.getItem(draftKey(userId)) || "",
+    } : { type: "reset-user", userId: null, projectId: null, composerDraft: "" });
+  }, [userId]);
+
+  useEffect(() => {
+    if (!state.restored || !userId) return;
+    if (state.selectedProjectId) localStorage.setItem(projectKey(userId), state.selectedProjectId);
+    else localStorage.removeItem(projectKey(userId));
+    localStorage.setItem(draftKey(userId), state.workspace.composerDraft);
+  }, [state.restored, state.selectedProjectId, state.workspace.composerDraft, userId]);
+
+  useEffect(() => {
+    if (!userId || !state.restored) return;
+    let active = true;
+    dispatch({ type: "set-projects-loading", loading: true });
+    dispatch({ type: "set-load-error", message: null });
+    void api.getProjects()
+      .then((projects: Record<string, unknown>[]) => {
+        if (!active) return;
+        const normalized = projects.map(normalizeProject);
+        dispatch({ type: "replace-projects", projects: normalized });
+        if (state.selectedProjectId && !normalized.some((project) => project.id === state.selectedProjectId)) {
+          dispatch({ type: "select-project", projectId: null });
+        }
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          dispatch({ type: "set-projects-loading", loading: false });
+          dispatch({ type: "set-load-error", message: error instanceof Error ? error.message : "Unable to load projects." });
+        }
+      });
+    return () => { active = false; };
+  }, [userId, state.restored, state.selectedProjectId]);
+
+  useEffect(() => {
+    if (!userId || !state.restored) return;
+    let active = true;
+    dispatch({ type: "set-assets-loading", loading: true });
+    dispatch({ type: "set-load-error", message: null });
+    void api.getAssets(state.selectedProjectId ?? undefined)
+      .then((assets: Record<string, unknown>[]) => {
+        if (active) dispatch({ type: "replace-assets", assets: assets.map(normalizeAsset) });
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          dispatch({ type: "set-assets-loading", loading: false });
+          dispatch({ type: "set-load-error", message: error instanceof Error ? error.message : "Unable to load assets." });
+        }
+      });
+    return () => { active = false; };
+  }, [userId, state.restored, state.selectedProjectId]);
   const value = useMemo<StudioContextValue>(() => ({
     state,
     dispatch,
