@@ -26,7 +26,8 @@ type StudioAction =
   | { type: "set-inspector-open"; open: boolean }
   | { type: "set-navigation-open"; open: boolean }
   | { type: "set-workspace-view"; view: WorkspaceView }
-  | { type: "replace-jobs"; jobs: GenerationJob[] };
+  | { type: "replace-jobs"; jobs: GenerationJob[] }
+  | { type: "upsert-job"; job: GenerationJob };
 
 const initialState: StudioState = {
   projects: [],
@@ -58,6 +59,15 @@ function studioReducer(state: StudioState, action: StudioAction): StudioState {
       return { ...state, workspace: { ...state.workspace, view: action.view } };
     case "replace-jobs":
       return { ...state, jobs: action.jobs };
+    case "upsert-job": {
+      const exists = state.jobs.some((job) => job.id === action.job.id);
+      return {
+        ...state,
+        jobs: exists
+          ? state.jobs.map((job) => job.id === action.job.id ? action.job : job)
+          : [action.job, ...state.jobs],
+      };
+    }
   }
 }
 

@@ -71,6 +71,14 @@
 .emptyState h2 { margin: var(--mf-space-3) 0; font-size: clamp(1.5rem, 4vw, 2.3rem); }
 .emptyState p { color: var(--mf-text-secondary); line-height: 1.6; }
 .emptyState button, .composer button { padding: 0.7rem 1rem; color: white; border: 0; border-radius: var(--mf-radius-md); background: var(--mf-action-primary); font-weight: 650; }
+.generationCard { width: min(42rem, 100%); padding: var(--mf-space-6); border: 1px solid var(--mf-border-subtle); border-radius: var(--mf-radius-lg); background: rgb(17 23 34 / 90%); }
+.generationCard h2 { margin: var(--mf-space-2) 0; }
+.generationCard > p { color: var(--mf-text-secondary); line-height: 1.5; }
+.progress { height: 0.5rem; overflow: hidden; border-radius: 999px; background: var(--mf-surface-raised); }
+.progress span { display: block; height: 100%; border-radius: inherit; background: var(--mf-action-primary); transition: width 200ms ease; }
+.generatedImage { display: block; width: min(100%, 32rem); height: auto; margin: var(--mf-space-5) auto; border-radius: var(--mf-radius-md); }
+.generationCard .generationError { color: #ff8d8d; }
+.generationCard .generationMeta { margin-bottom: 0; color: var(--mf-text-muted); font-size: 0.8rem; text-transform: capitalize; }
 
 .inspector { padding: var(--mf-space-5); border-left: 1px solid var(--mf-border-subtle); }
 .panelHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--mf-space-3); }
@@ -87,6 +95,7 @@
 .composer textarea { width: 100%; min-height: 3.25rem; resize: none; color: var(--mf-text-primary); border: 0; outline: 0; background: transparent; }
 .composer textarea::placeholder { color: var(--mf-text-muted); }
 .composer button:disabled { opacity: 0.48; cursor: not-allowed; }
+.composer .cancelButton { color: var(--mf-text-secondary); border: 1px solid var(--mf-border-subtle); background: transparent; }
 .composerMeta { display: flex; justify-content: space-between; gap: var(--mf-space-3); margin-top: var(--mf-space-2); color: var(--mf-text-muted); font-size: 0.72rem; }
 
 .iconButton { display: grid; width: 2.5rem; height: 2.5rem; flex: 0 0 auto; place-items: center; color: var(--mf-text-primary); border: 1px solid var(--mf-border-subtle); border-radius: var(--mf-radius-md); background: var(--mf-surface-raised); cursor: pointer; }
