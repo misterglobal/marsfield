@@ -75,4 +75,3 @@ Projects persist composer drafts, workspace ordering, selected assets, inspector
 ## Responsive behavior
 
 Desktop presents workspace, composer, and inspector concurrently when space permits. Tablet may overlay or collapse the inspector. Mobile uses a single primary surface with bottom-sheet composer and inspector modes. Across sizes, selection and lineage semantics remain consistent, the composer and generation status remain reachable, touch targets are accessible, keyboard and assistive-technology workflows remain complete, and controls collapse by priority rather than arbitrary omission.
-

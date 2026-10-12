@@ -48,4 +48,3 @@ If the interface cannot answer those questions, the design is incomplete.
 ## Boundaries
 
 Studio V2 does not imply a single model, media type, or linear workflow. The foundation must support image, video, audio, and future modalities while keeping provider-specific controls contained. It must preserve existing authorization, ownership, credit, safety, and provider-spend boundaries.
-

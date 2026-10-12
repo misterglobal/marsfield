@@ -134,4 +134,3 @@ Text and controls meet WCAG AA contrast. Focus remains visible on every semantic
 - Document migrations when token meaning changes.
 - Validate desktop, mobile, keyboard, reduced-motion, and high-contrast conditions.
 - Keep provider branding outside the core semantic palette unless required.
-

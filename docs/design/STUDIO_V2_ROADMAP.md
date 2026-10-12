@@ -64,4 +64,3 @@ Every implementation PR identifies the user outcome and non-goals; affected proj
 ## Success measures
 
 Studio V2 should reduce time from idea to useful output, repeated configuration, and recovery effort; increase reuse of assets and references; and improve project resumption. Track generation failures, accidental spend, accessibility regressions, and persistence errors as safeguards.
-
