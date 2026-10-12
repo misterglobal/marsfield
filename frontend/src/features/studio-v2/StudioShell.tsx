@@ -86,13 +86,18 @@ function StudioComposer() {
   const { state, dispatch } = useStudio();
   const abortController = useRef<AbortController | null>(null);
   const submitting = useRef(false);
+  const activeUserId = useRef(state.activeUserId);
   const activeJob = state.jobs[0];
 
-  useEffect(() => () => abortController.current?.abort(), []);
+  useEffect(() => {
+    activeUserId.current = state.activeUserId;
+    return () => abortController.current?.abort();
+  }, [state.activeUserId]);
 
   const submitGeneration = async () => {
     if (submitting.current) return;
     submitting.current = true;
+    const generationUserId = state.activeUserId;
     abortController.current?.abort();
     abortController.current = new AbortController();
     try {
@@ -104,7 +109,11 @@ function StudioComposer() {
         },
         {
           signal: abortController.current.signal,
-          onUpdate: (job) => dispatch({ type: "upsert-job", job }),
+          onUpdate: (job) => {
+            if (generationUserId && activeUserId.current === generationUserId) {
+              dispatch({ type: "upsert-job", job });
+            }
+          },
         },
       );
     } finally {

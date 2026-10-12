@@ -95,7 +95,14 @@ function studioReducer(state: StudioState, action: StudioAction): StudioState {
         restored: true,
       };
     case "replace-projects":
-      return { ...state, projects: action.projects, projectsLoading: false };
+      return {
+        ...state,
+        projects: action.projects,
+        selectedProjectId: state.selectedProjectId && action.projects.some((project) => project.id === state.selectedProjectId)
+          ? state.selectedProjectId
+          : null,
+        projectsLoading: false,
+      };
     case "replace-assets":
       return { ...state, assets: action.assets, selectedAssetId: null, assetsLoading: false };
     case "set-load-error":
@@ -183,9 +190,6 @@ export function StudioProvider({ children, userId }: PropsWithChildren<{ userId?
         if (!active) return;
         const normalized = projects.map(normalizeProject);
         dispatch({ type: "replace-projects", projects: normalized });
-        if (state.selectedProjectId && !normalized.some((project) => project.id === state.selectedProjectId)) {
-          dispatch({ type: "select-project", projectId: null });
-        }
       })
       .catch((error: unknown) => {
         if (active) {
@@ -194,7 +198,7 @@ export function StudioProvider({ children, userId }: PropsWithChildren<{ userId?
         }
       });
     return () => { active = false; };
-  }, [userId, state.restored, state.selectedProjectId]);
+  }, [userId, state.restored]);
 
   useEffect(() => {
     if (!userId || !state.restored) return;

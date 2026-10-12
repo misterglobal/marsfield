@@ -69,3 +69,25 @@ test("passes selected project and owned image reference to unified generation", 
     params: { reference_image_ids: [asset.storageObjectId] },
   });
 });
+
+test("does not allow non-image assets to become generation references", async ({ page }) => {
+  const videoAsset = {
+    ...asset,
+    id: "asset-video",
+    type: "video",
+    prediction: { prompt: "Campaign motion reference" },
+  };
+
+  await authenticate(page);
+  await mockApi(page, {
+    "GET /api/v1/projects": [project],
+    "GET /api/v1/assets": [videoAsset],
+  });
+
+  await page.goto("/studio-v2");
+  await page.getByRole("button", { name: project.name }).click();
+
+  await expect(page.getByRole("button", { name: "Campaign motion reference" })).toBeDisabled();
+  await expect(page.getByRole("form", { name: "Universal composer" })).toContainText("No references attached");
+  await expect(page.getByRole("complementary", { name: "Contextual inspector" }).getByText("project", { exact: true })).toBeVisible();
+});
