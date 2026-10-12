@@ -1,11 +1,10 @@
 import { expect, test } from "@playwright/test";
+import { authenticate, mockApi } from "./fixtures";
 
 test.describe("Studio V2 foundation", () => {
-  test("renders the internal application shell without API calls", async ({ page }) => {
-    const apiRequests: string[] = [];
-    page.on("request", (request) => {
-      if (new URL(request.url()).pathname.startsWith("/api/")) apiRequests.push(request.url());
-    });
+  test("renders the internal application shell with empty workspace data", async ({ page }) => {
+    await authenticate(page);
+    await mockApi(page);
 
     await page.goto("/studio-v2");
 
@@ -17,10 +16,11 @@ test.describe("Studio V2 foundation", () => {
     await expect(page.getByRole("form", { name: "Universal composer" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Start with the creative outcome" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Create" })).toBeDisabled();
-    expect(apiRequests).toEqual([]);
   });
 
   test("stores composer and workspace interaction state", async ({ page }) => {
+    await authenticate(page);
+    await mockApi(page);
     await page.goto("/studio-v2");
     const composer = page.getByLabel("What do you want to create?");
     await composer.fill("A calm product film in morning light");

@@ -37,10 +37,12 @@ export interface Project {
 
 export interface Asset {
   id: EntityId;
-  projectId: EntityId;
+  projectId?: EntityId;
   kind: AssetKind;
   name: string;
+  url: string;
   thumbnailUrl?: string;
+  storageObjectId?: EntityId;
   sourceGenerationId?: EntityId;
   createdAt: string;
 }

@@ -1,6 +1,9 @@
 import { expect, test } from "@playwright/test";
+import { authenticate, mockApi } from "./fixtures";
 
 test("Studio V2 fits mobile and exposes navigation and inspector controls", async ({ page }) => {
+  await authenticate(page);
+  await mockApi(page);
   await page.goto("/studio-v2");
 
   await expect(page.getByTestId("studio-v2-shell")).toBeVisible();

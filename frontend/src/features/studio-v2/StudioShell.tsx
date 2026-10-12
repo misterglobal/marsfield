@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { useEffect, useRef } from "react";
+import { useAuth } from "@/app/layout";
 import { generateImage } from "./generation-service";
 import { EmptyState, IconButton, SegmentedControl, StudioRegion } from "./StudioPrimitives";
 import { StudioProvider, useStudio } from "./state";
@@ -9,7 +10,7 @@ import type { WorkspaceView } from "./types";
 import styles from "./studio-v2.module.css";
 
 function StudioNavigation() {
-  const { state } = useStudio();
+  const { state, dispatch } = useStudio();
 
   return (
     <aside
@@ -31,7 +32,21 @@ function StudioNavigation() {
       </nav>
       <div className={styles.projectList}>
         <span className={styles.sectionLabel}>Projects</span>
-        <p>{state.projects.length === 0 ? "No Studio V2 projects yet" : `${state.projects.length} projects`}</p>
+        {state.projectsLoading ? <p>Loading projects…</p> : state.projects.length === 0 ? <p>No projects yet</p> : (
+          <div className={styles.selectionList}>
+            {state.projects.map((project) => (
+              <button
+                type="button"
+                key={project.id}
+                className={state.selectedProjectId === project.id ? styles.selectionActive : ""}
+                aria-pressed={state.selectedProjectId === project.id}
+                onClick={() => dispatch({ type: "select-project", projectId: project.id })}
+              >
+                {project.name}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       <p className={styles.internalLabel}>Internal preview</p>
     </aside>
@@ -55,9 +70,10 @@ function StudioInspector() {
         <IconButton aria-label="Close inspector" onClick={() => dispatch({ type: "set-inspector-open", open: false })}>×</IconButton>
       </div>
       <div className={styles.inspectorBody}>
-        <p>Select an asset or generation to see its settings, lineage, and available actions.</p>
+        <p>{selectedAsset ? "This owned asset is selected as the composer reference." : selectedProject ? "New generations will be saved to this project." : "Select a project or asset to establish creative context."}</p>
         <dl>
-          <div><dt>Selection</dt><dd>None</dd></div>
+          <div><dt>Selection</dt><dd>{selectedAsset?.kind ?? (selectedProject ? "project" : "none")}</dd></div>
+          {selectedAsset?.storageObjectId && <div><dt>Reference</dt><dd>Ready</dd></div>}
           <div><dt>Active jobs</dt><dd>{state.jobs.filter((job) => job.status === "processing" || job.status === "queued").length}</dd></div>
           <div><dt>Workspace</dt><dd>{state.workspace.view}</dd></div>
         </dl>
@@ -70,21 +86,34 @@ function StudioComposer() {
   const { state, dispatch } = useStudio();
   const abortController = useRef<AbortController | null>(null);
   const submitting = useRef(false);
+  const activeUserId = useRef(state.activeUserId);
   const activeJob = state.jobs[0];
 
-  useEffect(() => () => abortController.current?.abort(), []);
+  useEffect(() => {
+    activeUserId.current = state.activeUserId;
+    return () => abortController.current?.abort();
+  }, [state.activeUserId]);
 
   const submitGeneration = async () => {
     if (submitting.current) return;
     submitting.current = true;
+    const generationUserId = state.activeUserId;
     abortController.current?.abort();
     abortController.current = new AbortController();
     try {
       await generateImage(
-        { prompt: state.workspace.composerDraft, projectId: state.selectedProjectId ?? undefined },
+        {
+          prompt: state.workspace.composerDraft,
+          projectId: state.selectedProjectId ?? undefined,
+          referenceStorageObjectId: state.assets.find((asset) => asset.id === state.selectedAssetId && asset.kind === "image")?.storageObjectId,
+        },
         {
           signal: abortController.current.signal,
-          onUpdate: (job) => dispatch({ type: "upsert-job", job }),
+          onUpdate: (job) => {
+            if (generationUserId && activeUserId.current === generationUserId) {
+              dispatch({ type: "upsert-job", job });
+            }
+          },
         },
       );
     } finally {
@@ -101,6 +130,7 @@ function StudioComposer() {
       <div className={styles.composerInput}>
         <textarea
           id="studio-v2-prompt"
+          disabled={!state.activeUserId}
           value={state.workspace.composerDraft}
           onChange={(event) => dispatch({ type: "set-composer-draft", value: event.target.value })}
           placeholder="Describe the creative outcome. Tools and models will come later."
@@ -108,7 +138,7 @@ function StudioComposer() {
         />
         <button
           type="submit"
-          disabled={!state.workspace.composerDraft.trim() || activeJob?.status === "queued" || activeJob?.status === "processing"}
+          disabled={!state.activeUserId || !state.workspace.composerDraft.trim() || activeJob?.status === "queued" || activeJob?.status === "processing"}
         >
           {activeJob?.status === "queued" || activeJob?.status === "processing" ? "Creating…" : "Create image"}
         </button>
@@ -119,7 +149,7 @@ function StudioComposer() {
         )}
       </div>
       <div className={styles.composerMeta}>
-        <span>No references attached</span>
+        <span>{state.assets.some((asset) => asset.id === state.selectedAssetId && asset.kind === "image" && asset.storageObjectId) ? "1 image reference attached" : "No references attached"}</span>
         <span>Image generation · {activeJob ? `${activeJob.credits.charged} credits charged` : "existing Marsfield API"}</span>
       </div>
     </form>
@@ -127,7 +157,7 @@ function StudioComposer() {
 }
 
 function StudioWorkspace() {
-  const { state, dispatch } = useStudio();
+  const { state, selectedProject, dispatch } = useStudio();
   const activeJob = state.jobs[0];
 
   return (
@@ -145,7 +175,7 @@ function StudioWorkspace() {
         </div>
         <div>
           <span className={styles.eyebrow}>Creative work first</span>
-          <h1>Untitled project</h1>
+          <h1>{selectedProject?.name ?? "All creative work"}</h1>
         </div>
         <div className={styles.workspaceTools}>
           <SegmentedControl
@@ -165,7 +195,9 @@ function StudioWorkspace() {
         </div>
       </header>
       <StudioRegion label="Creative workspace" className={styles.canvas}>
-        {activeJob ? (
+        {state.loadError ? (
+          <EmptyState eyebrow="Workspace unavailable" title="We couldn't load your workspace" description={state.loadError} />
+        ) : activeJob ? (
           <article className={styles.generationCard} aria-live="polite" data-error-code={activeJob.error?.code}>
             <span className={styles.eyebrow}>Image generation</span>
             <h2>{activeJob.status === "completed" ? "Image ready" : activeJob.status === "failed" ? "Generation failed" : activeJob.status === "cancelled" ? "Tracking cancelled" : "Creating your image"}</h2>
@@ -191,6 +223,26 @@ function StudioWorkspace() {
             )}
             <p className={styles.generationMeta}>{activeJob.status} · {activeJob.progress}% · {activeJob.credits.charged} credits</p>
           </article>
+        ) : state.projectsLoading || state.assetsLoading ? (
+          <p role="status">Loading workspace…</p>
+        ) : state.assets.length > 0 ? (
+          <div className={styles.assetGrid} aria-label="Workspace assets">
+            {state.assets.map((asset) => (
+              <button
+                type="button"
+                key={asset.id}
+                className={state.selectedAssetId === asset.id ? styles.assetSelected : ""}
+                aria-pressed={state.selectedAssetId === asset.id}
+                disabled={asset.kind !== "image" || !asset.storageObjectId}
+                onClick={() => dispatch({ type: "select-asset", assetId: asset.id })}
+              >
+                {asset.kind === "image" && (asset.thumbnailUrl || asset.url) ? (
+                  <Image src={asset.thumbnailUrl || asset.url} alt="" width={240} height={240} unoptimized />
+                ) : <span className={styles.assetPlaceholder}>{asset.kind}</span>}
+                <span>{asset.name}</span>
+              </button>
+            ))}
+          </div>
         ) : (
           <EmptyState
             eyebrow="Unified generation"
@@ -216,5 +268,6 @@ function StudioFrame() {
 }
 
 export function StudioShell() {
-  return <StudioProvider><StudioFrame /></StudioProvider>;
+  const { user } = useAuth();
+  return <StudioProvider userId={user?.id}><StudioFrame /></StudioProvider>;
 }

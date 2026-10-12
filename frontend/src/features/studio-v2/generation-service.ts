@@ -13,6 +13,7 @@ interface ExistingGenerationResponse {
 export interface ImageGenerationRequest {
   prompt: string;
   projectId?: string;
+  referenceStorageObjectId?: string;
 }
 
 export interface GenerationOptions {
@@ -108,6 +109,9 @@ export async function generateImage(
         resolution: "1K",
         output_format: "jpg",
         variations: 1,
+        reference_image_ids: request.referenceStorageObjectId
+          ? [request.referenceStorageObjectId]
+          : undefined,
       },
     }, { signal: options.signal }) as ExistingGenerationResponse;
 
